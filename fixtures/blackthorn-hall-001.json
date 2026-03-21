@@ -1,0 +1,183 @@
+{
+  "caseId": "blackthorn-hall-001",
+  "title": "The Crown v. Marcus Ashford",
+  "narrative": {
+    "hookScene": "The grand estate of Blackthorn Hall stands silent under a grey English sky. Inside the oak-paneled library, Lord Edmund Blackthorn lies dead, a crystal tumbler shattered on the Persian rug beside him. Just hours before, he had summoned his estate manager with urgent news: he'd discovered the family will was a forgery. Now Edmund is dead, and Marcus Ashford—the man who stood to lose everything—was the last person to see him alive.",
+    "chargeText": "Marcus Ashford, you are charged with murder contrary to common law, in that on the 15th day of January 2024, you did unlawfully kill Lord Edmund Blackthorn. How do you plead?",
+    "victimProfile": {
+      "name": "Lord Edmund Blackthorn",
+      "role": "Victim",
+      "background": "Wealthy patron and owner of Blackthorn Hall estate. At 68 years old, Edmund was known for his meticulous attention to detail and his passion for preserving his family's legacy. He had recently begun reviewing estate documents in preparation for updating his will.",
+      "relevantFacts": [
+        "Discovered the family will had been forged",
+        "Summoned Marcus Ashford to discuss the forgery on the evening of his death",
+        "Had a history of heart problems but was in stable condition",
+        "Was found dead in his library at approximately 8:45 PM"
+      ]
+    },
+    "defendantProfile": {
+      "name": "Marcus Ashford",
+      "role": "Defendant",
+      "background": "Estate manager at Blackthorn Hall for 15 years. Marcus, 42, had worked his way up from groundskeeper to trusted manager. He handled all financial matters for the estate and was considered indispensable by the Blackthorn family.",
+      "relevantFacts": [
+        "Had exclusive access to estate financial records and legal documents",
+        "Was the last person to see Lord Blackthorn alive",
+        "Claims he left the library at 8:15 PM with Lord Blackthorn in good health",
+        "Had significant debts from his late father's medical bills"
+      ]
+    },
+    "witnessProfiles": [
+      {
+        "name": "Dr. Sarah Chen",
+        "role": "Forensic Pathologist",
+        "background": "Home Office pathologist with 18 years of experience in forensic medicine",
+        "relevantFacts": [
+          "Determined time of death between 8:00 PM and 8:45 PM",
+          "Found traces of digoxin in Lord Blackthorn's system",
+          "Noted that digoxin overdose can mimic natural heart failure"
+        ]
+      },
+      {
+        "name": "Mrs. Eleanor Pemberton",
+        "role": "Housekeeper",
+        "background": "Head housekeeper at Blackthorn Hall for 22 years, loyal to the family",
+        "relevantFacts": [
+          "Heard raised voices from the library around 8:00 PM",
+          "Saw Marcus leaving the library at approximately 8:15 PM",
+          "Found Lord Blackthorn's body at 8:45 PM when bringing evening tea"
+        ]
+      },
+      {
+        "name": "Detective Inspector James Morrison",
+        "role": "Investigating Officer",
+        "background": "Senior detective with Metropolitan Police, 25 years of service",
+        "relevantFacts": [
+          "Found the forged will document on Lord Blackthorn's desk",
+          "Discovered Marcus had access to digoxin through estate medical supplies",
+          "Noted no signs of forced entry or struggle"
+        ]
+      }
+    ]
+  },
+  "evidence": [
+    {
+      "id": "evidence-001",
+      "type": "documentary",
+      "title": "Forged Will Document",
+      "description": "A will document dated 2020 naming Marcus Ashford as a significant beneficiary. Forensic analysis revealed the signature was traced and the paper stock didn't match other Blackthorn family documents from that period. Lord Blackthorn had marked it with red ink: 'FORGERY - Confront MA immediately.'",
+      "timestamp": "2024-01-15T19:30:00Z",
+      "presentedBy": "prosecution",
+      "significance": "Establishes motive - Marcus stood to inherit £500,000 under the forged will and would lose everything if exposed"
+    },
+    {
+      "id": "evidence-002",
+      "type": "testimonial",
+      "title": "Housekeeper's Testimony",
+      "description": "Mrs. Pemberton testifies she heard raised voices from the library at approximately 8:00 PM. She distinctly heard Lord Blackthorn say 'This is fraud, Marcus. I trusted you.' She then saw Marcus leave the library at 8:15 PM, looking 'pale and shaken.' She found Lord Blackthorn dead at 8:45 PM.",
+      "timestamp": "2024-01-15T20:00:00Z",
+      "presentedBy": "prosecution",
+      "significance": "Places defendant at the scene during the critical time window and establishes confrontation occurred"
+    },
+    {
+      "id": "evidence-003",
+      "type": "physical",
+      "title": "Toxicology Report",
+      "description": "Post-mortem toxicology revealed elevated levels of digoxin in Lord Blackthorn's blood - approximately 3 times the therapeutic dose. Digoxin is a heart medication that can be fatal in overdose, causing cardiac arrest that mimics natural heart failure. The estate medical cabinet contained digoxin for Lady Blackthorn's heart condition.",
+      "timestamp": "2024-01-15T20:15:00Z",
+      "presentedBy": "prosecution",
+      "significance": "Suggests poisoning rather than natural causes; Marcus had access to the medical cabinet"
+    },
+    {
+      "id": "evidence-004",
+      "type": "documentary",
+      "title": "Security Gate Log",
+      "description": "The estate's front gate security log shows Marcus's vehicle entered at 7:45 PM and exited at 8:20 PM on the night in question. The log is automatically timestamped and cannot be manually altered. The drive from the gate to the main house takes approximately 3 minutes.",
+      "timestamp": "2024-01-15T20:30:00Z",
+      "presentedBy": "defence",
+      "significance": "Creates a tight timeline - Marcus could only have been in the house for approximately 32 minutes maximum"
+    },
+    {
+      "id": "evidence-005",
+      "type": "testimonial",
+      "title": "Defendant's Account",
+      "description": "Marcus testifies that Lord Blackthorn confronted him about the will, but he denied any knowledge of forgery. He claims he left at 8:15 PM with Lord Blackthorn alive and agitated but not in medical distress. He states he was never alone with the drinks cabinet or medical supplies, and that Lord Blackthorn poured his own whisky during their meeting.",
+      "timestamp": "2024-01-15T20:45:00Z",
+      "presentedBy": "defence",
+      "significance": "Provides alternative narrative - suggests someone else had opportunity to poison Lord Blackthorn"
+    },
+    {
+      "id": "evidence-006",
+      "type": "physical",
+      "title": "Fingerprint Analysis",
+      "description": "Forensic analysis found Marcus's fingerprints on the library door handle, the chair he sat in, and the forged will document. However, no fingerprints were found on the medical cabinet, the whisky decanter, or Lord Blackthorn's glass. The glass contained traces of digoxin mixed with whisky.",
+      "timestamp": "2024-01-15T21:00:00Z",
+      "presentedBy": "defence",
+      "significance": "Absence of Marcus's prints on the glass and medical cabinet raises doubt about how poison was administered"
+    },
+    {
+      "id": "evidence-007",
+      "type": "testimonial",
+      "title": "Pathologist's Timeline Analysis",
+      "description": "Dr. Chen testifies that digoxin overdose typically takes 30-60 minutes to cause cardiac arrest. Given the time of death (between 8:00-8:45 PM), the poison would need to have been administered between 7:00-8:15 PM. However, she notes that individual response varies, and in someone with pre-existing heart conditions, effects could be faster or slower.",
+      "timestamp": "2024-01-15T21:15:00Z",
+      "presentedBy": "defence",
+      "significance": "Creates ambiguity in the timeline - poison could have been administered before Marcus arrived or after he left"
+    }
+  ],
+  "timeline": [
+    {
+      "timestamp": "2024-01-15T19:30:00Z",
+      "description": "Lord Blackthorn discovers forged will and marks it 'FORGERY'",
+      "evidenceIds": ["evidence-001"]
+    },
+    {
+      "timestamp": "2024-01-15T19:45:00Z",
+      "description": "Marcus's vehicle enters estate gate (security log)",
+      "evidenceIds": ["evidence-004"]
+    },
+    {
+      "timestamp": "2024-01-15T20:00:00Z",
+      "description": "Housekeeper hears confrontation in library",
+      "evidenceIds": ["evidence-002"]
+    },
+    {
+      "timestamp": "2024-01-15T20:15:00Z",
+      "description": "Marcus leaves library, seen by housekeeper",
+      "evidenceIds": ["evidence-002", "evidence-005"]
+    },
+    {
+      "timestamp": "2024-01-15T20:20:00Z",
+      "description": "Marcus's vehicle exits estate gate (security log)",
+      "evidenceIds": ["evidence-004"]
+    },
+    {
+      "timestamp": "2024-01-15T20:45:00Z",
+      "description": "Housekeeper discovers Lord Blackthorn's body",
+      "evidenceIds": ["evidence-002"]
+    }
+  ],
+  "groundTruth": {
+    "actualVerdict": "not_guilty",
+    "keyFacts": [
+      "The timeline creates reasonable doubt - digoxin could have been administered before Marcus arrived or after he left",
+      "Absence of Marcus's fingerprints on the glass and medical cabinet suggests he didn't handle the poison",
+      "The tight 32-minute window from gate entry to exit makes it difficult to prove Marcus had opportunity to access medical supplies and administer poison",
+      "The pathologist's testimony about variable digoxin response times creates ambiguity about when poison was administered",
+      "While Marcus had motive and was present during a critical window, the prosecution cannot prove beyond reasonable doubt that he administered the poison"
+    ],
+    "reasoningCriteria": {
+      "requiredEvidenceReferences": [
+        "evidence-004",
+        "evidence-006",
+        "evidence-007"
+      ],
+      "logicalFallacies": [
+        "ad_hominem",
+        "appeal_to_emotion",
+        "hasty_generalization",
+        "false_dichotomy"
+      ],
+      "coherenceThreshold": 0.65
+    }
+  }
+}

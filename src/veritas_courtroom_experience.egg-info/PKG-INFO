@@ -1,0 +1,10 @@
+Metadata-Version: 2.4
+Name: veritas-courtroom-experience
+Version: 0.1.0
+Summary: Interactive courtroom drama experience with AI-driven trial simulation
+Requires-Python: >=3.10
+Requires-Dist: pydantic>=2.0.0
+Requires-Dist: pytest>=7.0.0
+Requires-Dist: hypothesis>=6.0.0
+Requires-Dist: fastapi>=0.100.0
+Requires-Dist: websockets>=11.0.0

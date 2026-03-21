@@ -1,0 +1,113 @@
+{
+  "caseId": "sample-case-001",
+  "title": "The Crown v. Sample Defendant",
+  "narrative": {
+    "hookScene": "A dark and stormy night at the manor. The victim was found in the study, a letter clutched in their hand.",
+    "chargeText": "The defendant is charged with murder contrary to common law.",
+    "victimProfile": {
+      "name": "Victoria Sterling",
+      "role": "Victim",
+      "background": "Wealthy art collector and philanthropist",
+      "relevantFacts": [
+        "Discovered threatening letter before death",
+        "Had recently changed will"
+      ]
+    },
+    "defendantProfile": {
+      "name": "Marcus Ashford",
+      "role": "Defendant",
+      "background": "Estate manager with 15 years of service",
+      "relevantFacts": [
+        "Had access to the study",
+        "Was present on the night of the incident"
+      ]
+    },
+    "witnessProfiles": [
+      {
+        "name": "Dr. James Patterson",
+        "role": "Medical Examiner",
+        "background": "Forensic pathologist with 20 years experience",
+        "relevantFacts": [
+          "Determined time of death",
+          "Found unusual evidence"
+        ]
+      }
+    ]
+  },
+  "evidence": [
+    {
+      "id": "evidence-001",
+      "type": "physical",
+      "title": "Threatening Letter",
+      "description": "A letter threatening to expose a secret",
+      "timestamp": "2024-01-15T14:30:00Z",
+      "presentedBy": "prosecution",
+      "significance": "Establishes motive"
+    },
+    {
+      "id": "evidence-002",
+      "type": "testimonial",
+      "title": "Witness Statement - Butler",
+      "description": "Butler testifies to seeing defendant near study",
+      "timestamp": "2024-01-15T20:00:00Z",
+      "presentedBy": "prosecution",
+      "significance": "Places defendant at scene"
+    },
+    {
+      "id": "evidence-003",
+      "type": "documentary",
+      "title": "Security Camera Footage",
+      "description": "Footage showing hallway outside study",
+      "timestamp": "2024-01-15T20:15:00Z",
+      "presentedBy": "defence",
+      "significance": "Shows timing inconsistency"
+    },
+    {
+      "id": "evidence-004",
+      "type": "physical",
+      "title": "Fingerprints on Door Handle",
+      "description": "Defendant's fingerprints found on study door",
+      "timestamp": "2024-01-15T21:00:00Z",
+      "presentedBy": "prosecution",
+      "significance": "Physical evidence of presence"
+    },
+    {
+      "id": "evidence-005",
+      "type": "testimonial",
+      "title": "Defendant's Alibi",
+      "description": "Defendant claims to have been in the garden",
+      "timestamp": "2024-01-15T20:30:00Z",
+      "presentedBy": "defence",
+      "significance": "Provides alternative timeline"
+    }
+  ],
+  "timeline": [
+    {
+      "timestamp": "2024-01-15T14:30:00Z",
+      "description": "Threatening letter discovered",
+      "evidenceIds": ["evidence-001"]
+    },
+    {
+      "timestamp": "2024-01-15T20:00:00Z",
+      "description": "Butler sees defendant near study",
+      "evidenceIds": ["evidence-002"]
+    },
+    {
+      "timestamp": "2024-01-15T20:15:00Z",
+      "description": "Security camera records hallway",
+      "evidenceIds": ["evidence-003"]
+    }
+  ],
+  "groundTruth": {
+    "actualVerdict": "not_guilty",
+    "keyFacts": [
+      "Timing inconsistency creates reasonable doubt",
+      "Alternative explanation exists for fingerprints"
+    ],
+    "reasoningCriteria": {
+      "requiredEvidenceReferences": ["evidence-003", "evidence-005"],
+      "logicalFallacies": ["ad_hominem", "appeal_to_emotion"],
+      "coherenceThreshold": 0.7
+    }
+  }
+}

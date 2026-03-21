@@ -1,0 +1,20 @@
+{
+  "sessionId": "test_session",
+  "userId": "test_user",
+  "caseId": "blackthorn-hall-001",
+  "currentState": "hook_scene",
+  "startTime": "2026-03-21T00:49:27.095121",
+  "lastActivityTime": "2026-03-21T00:49:27.095121",
+  "stateHistory": [],
+  "progress": {
+    "completedStages": [],
+    "deliberationStatements": [],
+    "vote": null,
+    "reasoningAssessment": null
+  },
+  "metadata": {
+    "pauseCount": 0,
+    "totalPauseDuration": 0.0,
+    "agentFailures": 0
+  }
+}

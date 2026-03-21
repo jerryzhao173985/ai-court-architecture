@@ -1,0 +1,23 @@
+[project]
+name = "veritas-courtroom-experience"
+version = "0.1.0"
+description = "Interactive courtroom drama experience with AI-driven trial simulation"
+requires-python = ">=3.10"
+dependencies = [
+    "pydantic>=2.0.0",
+    "pytest>=7.0.0",
+    "hypothesis>=6.0.0",
+    "fastapi>=0.100.0",
+    "websockets>=11.0.0",
+    "uvicorn>=0.23.0",
+]
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py", "*_test.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
