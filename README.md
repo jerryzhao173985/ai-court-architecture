@@ -91,17 +91,25 @@ fixtures/                        Case data
 └── sample_case.json             Minimal template for new cases
 
 scripts/                         Utilities
-├── setup/                       Bot setup (add_bots_to_user, setup_bots, check_notifications)
+├── verify_system.sh             System health check
+├── validate_case.py             Case JSON validator
+├── setup/                       Bot registration and configuration
 ├── debug/                       API connection testing
-└── demo/                        Interactive demos (fact checker, trial simulation)
+└── demo/                        Interactive demos
 
-tests/                           Test suites
-├── unit/                        Unit tests (state machine, session, fact checker)
-├── integration/                 Bot connectivity, courtroom group, deliberation tests
-└── analysis/                    Complexity analyzer and juror comparison analysis
+tests/                           244 unit tests + integration + load
+├── unit/                        Core logic tests (no API key needed)
+├── integration/                 End-to-end Luffa flow, admin commands
+├── load/                        Concurrent user simulation
+└── analysis/                    Complexity and juror comparison
 
-docs/                            Technical documentation
-└── LUFFA_INTEGRATION.md         Luffa Bot API reference and architecture
+examples/                        Demo scripts for individual subsystems
+
+docs/                            Reference docs and guides
+├── quickstart.md                Setup and first trial walkthrough
+├── deployment.md                Production checklist and architecture
+├── system-overview.md           Full component and command reference
+└── tasks/                       Implementation logs (Phases 21-27)
 ```
 
 ## Running Modes
@@ -152,7 +160,7 @@ Commands in the group chat:
 
 Prosecution Bot argues for guilt, Defence Bot creates doubt, Judge Bot provides legal instructions. The service polls all 5 bots, deduplicates messages, and filters bot echo to prevent loops.
 
-See `docs/LUFFA_INTEGRATION.md` for API reference and `QUICKSTART.md` for setup.
+See `docs/LUFFA_INTEGRATION.md` for API reference and `docs/quickstart.md` for setup.
 
 ## Configuration
 
@@ -177,7 +185,7 @@ MAX_EXPERIENCE_MINUTES=20
 ```bash
 pytest tests/unit/ -v                    # 244 unit tests, no API key needed
 pytest tests/integration/ -v             # Integration tests, requires API keys
-./verify_system.sh                       # Full system verification
+scripts/verify_system.sh                       # Full system verification
 ```
 
 ## Cost

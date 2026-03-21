@@ -359,7 +359,7 @@ Track:
 
 ### Getting Help
 
-1. Check `QUICKSTART.md` for setup
+1. Check `docs/quickstart.md` for setup
 2. Review `docs/multi-bot-architecture.md` for technical details
 3. See `docs/bot-deployment-guide.md` for deployment
 4. Check logs: `tail -f logs/multi-bot.log`
@@ -422,7 +422,7 @@ Users will see a realistic courtroom unfold in their group chat:
 
 ## Documentation
 
-- `QUICKSTART.md` - Quick start with your credentials
+- `docs/quickstart.md` - Quick start with your credentials
 - `docs/multi-bot-setup.md` - Detailed setup guide
 - `docs/multi-bot-architecture.md` - Technical architecture
 - `docs/bot-deployment-guide.md` - Production deployment

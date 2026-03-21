@@ -280,7 +280,7 @@ python validate_fact_checker_integration.py
 
 | Document | Purpose |
 |----------|---------|
-| `QUICKSTART.md` | Quick start with your bot credentials |
+| `docs/quickstart.md` | Quick start with your bot credentials |
 | `DEPLOYMENT_READY.md` | Deployment checklist |
 | `docs/multi-bot-setup.md` | Detailed setup instructions |
 | `docs/multi-bot-architecture.md` | Technical deep dive |
@@ -479,7 +479,7 @@ You'll know it's working when:
 ## 📞 Support
 
 ### Documentation
-- `QUICKSTART.md` - Start here
+- `docs/quickstart.md` - Start here
 - `DEPLOYMENT_READY.md` - Deployment checklist
 - `docs/multi-bot-architecture.md` - Technical details
 
