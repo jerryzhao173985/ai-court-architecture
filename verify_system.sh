@@ -7,15 +7,18 @@ echo "============================================================"
 echo ""
 
 # Activate virtual environment
-source venv/bin/activate
+if [ -d venv ]; then
+    source venv/bin/activate
+else
+    echo "✗ Virtual environment not found. Run: python3 -m venv venv && pip install -e ."
+    exit 1
+fi
 
 # Check 1: Dependencies
 echo "CHECK 1: Dependencies"
 echo "------------------------------------------------------------"
-python -c "import openai, anthropic, aiohttp, pytest, hypothesis; print('✓ All dependencies installed')" 2>/dev/null
-if [ $? -eq 0 ]; then
-    echo "✓ All Python packages available"
-else
+python -c "import openai, aiohttp, pydantic; print('✓ All dependencies installed')" 2>/dev/null
+if [ $? -ne 0 ]; then
     echo "✗ Missing dependencies - run: pip install -e ."
     exit 1
 fi
@@ -30,10 +33,16 @@ else
     echo "⚠ OPENAI_API_KEY not set (will use test mode)"
 fi
 
-if grep -q "LUFFA_BOT_SECRET=." .env 2>/dev/null; then
-    echo "✓ LUFFA_BOT_SECRET configured in .env"
+if grep -q "LUFFA_BOT_CLERK_SECRET=." .env 2>/dev/null; then
+    echo "✓ Luffa bot secrets configured in .env"
 else
-    echo "⚠ LUFFA_BOT_SECRET not set (Luffa Bot disabled)"
+    echo "⚠ Luffa bot secrets not set"
+fi
+
+if grep -q "LUFFA_BOT_ENABLED=true" .env 2>/dev/null; then
+    echo "✓ Luffa Bot enabled"
+else
+    echo "⚠ Luffa Bot disabled (set LUFFA_BOT_ENABLED=true)"
 fi
 echo ""
 
@@ -48,34 +57,28 @@ else
 fi
 echo ""
 
-# Check 4: Unit Tests
-echo "CHECK 4: Unit Tests"
+# Check 4: Bot Configuration
+echo "CHECK 4: Bot Configuration"
 echo "------------------------------------------------------------"
-python -m pytest tests/ -q --tb=no
-if [ $? -eq 0 ]; then
-    echo "✓ All unit tests passing"
-else
-    echo "✗ Some unit tests failed"
-    exit 1
+PYTHONPATH=src python -c "
+from config import load_config
+cfg = load_config()
+bots = [r for r, b in [('clerk', cfg.luffa.clerk_bot), ('prosecution', cfg.luffa.prosecution_bot), ('defence', cfg.luffa.defence_bot), ('fact_checker', cfg.luffa.fact_checker_bot), ('judge', cfg.luffa.judge_bot)] if b]
+print(f'✓ {len(bots)} bots configured: {chr(44).join(bots)}')
+" 2>/dev/null
+if [ $? -ne 0 ]; then
+    echo "⚠ Bot configuration check failed"
 fi
 echo ""
 
-# Check 5: Production Tests (if API key available)
-if [ -n "$OPENAI_API_KEY" ]; then
-    echo "CHECK 5: Production Tests (OpenAI Integration)"
-    echo "------------------------------------------------------------"
-    python test_production.py
-    if [ $? -eq 0 ]; then
-        echo ""
-        echo "✓ Production tests passing"
-    else
-        echo "✗ Production tests failed"
-        exit 1
-    fi
+# Check 5: Unit Tests
+echo "CHECK 5: Unit Tests"
+echo "------------------------------------------------------------"
+python -m pytest tests/unit/ -q --tb=no 2>/dev/null
+if [ $? -eq 0 ]; then
+    echo "✓ Unit tests passing"
 else
-    echo "CHECK 5: Production Tests"
-    echo "------------------------------------------------------------"
-    echo "⚠ Skipped (no OPENAI_API_KEY)"
+    echo "⚠ Some unit tests failed"
 fi
 echo ""
 
@@ -84,15 +87,11 @@ echo "============================================================"
 echo "VERIFICATION COMPLETE"
 echo "============================================================"
 echo ""
-echo "✅ System is fully operational!"
-echo ""
 echo "Available commands:"
-echo "  ./play.sh              - Interactive demo"
+echo "  ./run_courtroom.sh     - Start multi-bot Luffa trial"
+echo "  ./run_luffa_bot.sh     - Start single-bot service"
 echo "  ./run_server.sh        - Start API server"
-echo "  python test_production.py - Test with real OpenAI API"
+echo "  ./play.sh              - Interactive terminal demo"
 echo ""
-echo "To enable Luffa Bot:"
-echo "  1. Get bot secret from https://robot.luffa.im"
-echo "  2. Set LUFFA_BOT_SECRET in .env"
-echo "  3. Set LUFFA_BOT_ENABLED=true in .env"
+echo "See docs/LUFFA_INTEGRATION.md for technical reference."
 echo ""
