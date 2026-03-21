@@ -50,32 +50,40 @@ class LuffaBotAPIClient:
         self,
         endpoint: str,
         data: dict,
-        timeout: int = 10
+        timeout: int = 15
     ) -> Any:
         """
         Make HTTP request to Luffa Bot API.
-        
-        Args:
-            endpoint: API endpoint path
-            data: Request body data
-            timeout: Request timeout in seconds
-            
-        Returns:
-            Response data
-            
-        Raises:
-            Exception: If request fails
+
+        CRITICAL: Luffa returns HTTP 200 even on auth failure.
+        The real error is in the JSON body: {"code": 500, "msg": "Robot verification failed"}.
+        We must check the "code" field, not just HTTP status.
         """
         if not self.session:
             raise RuntimeError("Client session not initialized. Use async context manager.")
-        
+
         url = f"{self.base_url}{endpoint}"
-        
+
         try:
             async def _do_request():
                 async with self.session.post(url, json=data) as response:
                     response.raise_for_status()
-                    return await response.json()
+                    result = await response.json()
+
+                    # CRITICAL: Check API-level error code in response body.
+                    # Luffa returns HTTP 200 even for auth failures!
+                    if isinstance(result, dict):
+                        api_code = result.get("code")
+                        if api_code is not None and api_code != 200:
+                            api_msg = result.get("msg", "Unknown error")
+                            if "verification failed" in str(api_msg).lower():
+                                logger.error(
+                                    f"AUTH FAILED on {endpoint}: {api_msg} — "
+                                    f"regenerate bot secret at https://robot.luffa.im"
+                                )
+                            raise Exception(f"Luffa API {endpoint}: code={api_code} msg={api_msg}")
+
+                    return result
 
             return await asyncio.wait_for(_do_request(), timeout=timeout)
 
@@ -136,7 +144,7 @@ class LuffaBotAPIClient:
                             self.seen_message_ids[msg_id] = None
                             parsed_messages.append({
                                 "uid": msg_obj.get("uid"),  # Sender or group ID
-                                "gid": msg_obj.get("uid") if msg_obj.get("type") == 1 else None,  # Group ID
+                                "gid": msg_obj.get("uid") if str(msg_obj.get("type")) == "1" else None,  # Group ID
                                 "type": msg_obj.get("type"),  # 0=DM, 1=Group
                                 "text": parsed.get("text"),
                                 "msgId": msg_id,

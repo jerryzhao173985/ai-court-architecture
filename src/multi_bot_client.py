@@ -5,6 +5,8 @@ import logging
 from typing import Optional, Literal
 from datetime import datetime
 
+import aiohttp
+
 from luffa_client import LuffaBotAPIClient
 from config import LuffaConfig, LuffaBotConfig
 
@@ -101,26 +103,33 @@ class MultiBotClient:
         logger.warning(f"No Luffa client configured for {agent_role}")
         return None
     
+    async def _ensure_client_session(self, client: LuffaBotAPIClient):
+        """Ensure client has an active session (create if needed)."""
+        if client.session is None or client.session.closed:
+            client.session = aiohttp.ClientSession(
+                headers={"Content-Type": "application/json"}
+            )
+
     async def send_as_agent(
         self,
         agent_role: str,
         group_id: str,
         message: str,
-        button: Optional[list[dict]] = None,
+        buttons: Optional[list[dict]] = None,
         confirm: Optional[list[dict]] = None,
         is_dm: bool = False
     ) -> bool:
         """
         Send message to group or DM as specific agent bot.
-        
+
         Args:
             agent_role: Role of the agent sending the message
             group_id: Luffa group ID or user ID (for DMs)
             message: Message content
-            button: Optional regular buttons
+            buttons: Optional regular buttons
             confirm: Optional confirm buttons
             is_dm: If True, send as DM instead of group message
-            
+
         Returns:
             True if sent successfully, False otherwise
         """
@@ -128,32 +137,30 @@ class MultiBotClient:
         if not client:
             logger.error(f"Cannot send message as {agent_role}: no client configured")
             return False
-        
+
         try:
-            # Use async context manager
-            async with client:
-                if is_dm:
-                    # Send direct message
-                    result = await client.send_dm(
-                        recipient_uid=group_id,
-                        text=message
-                    )
-                else:
-                    # Send group message
-                    result = await client.send_group_message(
-                        group_id=group_id,
-                        text=message,
-                        button=button,
-                        confirm=confirm
-                    )
-                
-                if result.get("success"):
-                    msg_type = "DM" if is_dm else "group message"
-                    logger.info(f"Sent {msg_type} as {agent_role} to {group_id}")
-                    return True
-                else:
-                    logger.error(f"Failed to send as {agent_role}: {result.get('error')}")
-                    return False
+            await self._ensure_client_session(client)
+
+            if is_dm:
+                result = await client.send_dm(
+                    recipient_uid=group_id,
+                    text=message
+                )
+            else:
+                result = await client.send_group_message(
+                    group_id=group_id,
+                    text=message,
+                    buttons=buttons,
+                    confirm=confirm
+                )
+
+            if result.get("success"):
+                msg_type = "DM" if is_dm else "group message"
+                logger.info(f"Sent {msg_type} as {agent_role} to {group_id}")
+                return True
+            else:
+                logger.error(f"Failed to send as {agent_role}: {result.get('error')}")
+                return False
         except Exception as e:
             logger.error(f"Failed to send message as {agent_role}: {e}")
             return False
@@ -161,20 +168,20 @@ class MultiBotClient:
     async def poll_messages(self, agent_role: str) -> list[dict]:
         """
         Poll for messages received by specific agent bot.
-        
+
         Args:
             agent_role: Role of the agent to poll for
-            
+
         Returns:
             List of messages
         """
         client = self.get_client(agent_role)
         if not client:
             return []
-        
+
         try:
-            async with client:
-                return await client.receive_messages()
+            await self._ensure_client_session(client)
+            return await client.receive_messages()
         except Exception as e:
             logger.error(f"Failed to poll messages for {agent_role}: {e}")
             return []
@@ -184,22 +191,22 @@ class MultiBotClient:
         group_id: str,
         stage_name: str,
         stage_description: str,
-        button: Optional[list[dict]] = None
+        buttons: Optional[list[dict]] = None
     ) -> bool:
         """
         Broadcast stage announcement from Clerk bot.
-        
+
         Args:
             group_id: Luffa group ID
             stage_name: Name of the trial stage
             stage_description: Description of what happens in this stage
-            button: Optional interactive buttons
-            
+            buttons: Optional interactive buttons
+
         Returns:
             True if sent successfully
         """
         message = f"⚖️ **{stage_name}**\n\n{stage_description}"
-        return await self.send_as_agent("clerk", group_id, message, button=button)
+        return await self.send_as_agent("clerk", group_id, message, buttons=buttons)
     
     def has_bot_for_role(self, agent_role: str) -> bool:
         """

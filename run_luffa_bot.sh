@@ -11,15 +11,15 @@ if [ ! -f .env ]; then
     exit 1
 fi
 
-# Check if bot secret is set
-if ! grep -q "LUFFA_BOT_SECRET=." .env; then
-    echo "❌ LUFFA_BOT_SECRET not set in .env"
+# Check if bot secret is set (multi-bot or legacy single-bot)
+if ! grep -q "LUFFA_BOT_CLERK_SECRET=." .env && ! grep -q "LUFFA_BOT_SECRET=." .env; then
+    echo "❌ No Luffa bot secret found in .env"
     echo ""
     echo "To get your bot secret:"
     echo "  1. Visit https://robot.luffa.im"
     echo "  2. Create or access your bot"
     echo "  3. Copy the bot secret"
-    echo "  4. Add to .env: LUFFA_BOT_SECRET=<your_secret>"
+    echo "  4. Add to .env: LUFFA_BOT_CLERK_SECRET=<your_secret>"
     echo "  5. Set LUFFA_BOT_ENABLED=true"
     exit 1
 fi
@@ -42,4 +42,4 @@ echo "The bot will poll for messages every 1 second."
 echo "Press Ctrl+C to stop."
 echo ""
 
-python src/luffa_bot_service.py
+cd src && python luffa_bot_service.py

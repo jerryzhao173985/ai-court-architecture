@@ -432,7 +432,7 @@ Coherence Score: {assessment['coherenceScore']:.2f}/1.0
         
         for juror in dual_reveal["jurorReveal"]:
             if juror["type"] != "human":
-                persona = juror.get("persona", "").replace("_", " ").title()
+                persona = (juror.get("persona") or "").replace("_", " ").title()
                 vote_text = juror["vote"].replace("_", " ").title()
                 
                 juror_text += f"• {juror['jurorId']}: {persona or 'Juror'} - Voted {vote_text}\n"
@@ -499,9 +499,9 @@ Coherence Score: {assessment['coherenceScore']:.2f}/1.0
             return
         
         progress = orchestrator.get_progress()
-        current = progress["currentStage"].replace("_", " ").title()
+        current = progress.get("current_stage_name", progress.get("current_stage", "Unknown"))
         
-        text = f"📊 TRIAL STATUS\n\nCurrent Stage: {current}\nProgress: {progress['completedStages']}/{progress['totalStages']} stages"
+        text = f"📊 TRIAL STATUS\n\nCurrent Stage: {current}\nProgress: {progress.get('completed_count', 0)}/{progress.get('total_stages', 13)} stages"
         
         await self.client.send_group_message(group_id, text)
 

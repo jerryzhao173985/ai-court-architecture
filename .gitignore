@@ -1,4 +1,5 @@
 .env
+.env.local
 venv/
 __pycache__/
 *.pyc
@@ -7,3 +8,5 @@ __pycache__/
 dist/
 build/
 complexity_test_results.json
+data/sessions/
+src/data/sessions/

@@ -23,7 +23,7 @@ fi
 
 # Quick configuration check
 echo "🔍 Verifying configuration..."
-python -c "from src.config import load_config; cfg = load_config(); print(f'✅ {len([b for b in [cfg.luffa.clerk_bot, cfg.luffa.prosecution_bot, cfg.luffa.defence_bot, cfg.luffa.fact_checker_bot, cfg.luffa.judge_bot] if b])} bots configured')"
+PYTHONPATH=src python -c "from config import load_config; cfg = load_config(); print(f'✅ {len([b for b in [cfg.luffa.clerk_bot, cfg.luffa.prosecution_bot, cfg.luffa.defence_bot, cfg.luffa.fact_checker_bot, cfg.luffa.judge_bot] if b])} bots configured')"
 
 if [ $? -ne 0 ]; then
     echo "❌ Configuration error"
@@ -45,4 +45,4 @@ echo "=========================================="
 echo ""
 
 # Start the service
-python src/multi_bot_service.py
+cd src && python multi_bot_service.py

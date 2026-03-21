@@ -34,7 +34,7 @@ class LuffaConfig(BaseModel):
     """Configuration for Luffa Bot API - Multi-Bot Architecture."""
     model_config = ConfigDict(populate_by_name=True)
     
-    api_base_url: str = Field(default="https://api.luffa.im", alias="apiBaseUrl")
+    api_base_url: str = Field(default="https://apibot.luffa.im/robot", alias="apiBaseUrl")
     
     # Multi-bot configuration - each trial agent as separate bot
     clerk_bot: Optional[LuffaBotConfig] = Field(default=None, alias="clerkBot")
@@ -86,7 +86,7 @@ def load_config() -> AppConfig:
     llm_model = os.getenv("LLM_MODEL", "gpt-4o" if llm_provider == "openai" else "claude-3-sonnet-20240229")
     
     # Luffa configuration - Multi-bot architecture
-    luffa_api_url = os.getenv("LUFFA_API_ENDPOINT", "https://api.luffa.im")
+    luffa_api_url = os.getenv("LUFFA_API_ENDPOINT", "https://apibot.luffa.im/robot")
     
     # Load individual bot configurations
     clerk_bot = None

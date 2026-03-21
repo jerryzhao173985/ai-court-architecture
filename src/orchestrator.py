@@ -230,13 +230,14 @@ class ExperienceOrchestrator:
             # Start deliberation if entering jury deliberation
             if next_state == ExperienceState.JURY_DELIBERATION:
                 deliberation_prompt = self.jury_orchestrator.start_deliberation()
+                self._save_progress()
                 return {
                     "success": True,
                     "stage": next_state.value,
                     "announcement": announcement.model_dump(by_alias=True),
                     "deliberation_prompt": deliberation_prompt
                 }
-            
+
             # Save progress
             self._save_progress()
             
@@ -353,7 +354,9 @@ class ExperienceOrchestrator:
                 juror_reveals
             )
             
-            # Transition to dual reveal state
+            # Transition through ANONYMOUS_VOTE to DUAL_REVEAL
+            # State machine requires sequential transitions: DELIBERATION → VOTE → REVEAL
+            await self.state_machine.transition_to(ExperienceState.ANONYMOUS_VOTE)
             await self.state_machine.transition_to(ExperienceState.DUAL_REVEAL)
             self.user_session.current_state = ExperienceState.DUAL_REVEAL
             
@@ -778,8 +781,8 @@ class ExperienceOrchestrator:
             await self._send_message(uid, msg.get("type"), "⚠️ No active trial.")
             return
         
-        current = progress["currentStage"].replace("_", " ").title()
-        text = f"📊 TRIAL STATUS\n\nCurrent Stage: {current}\nProgress: {progress['completedStages']}/{progress['totalStages']} stages"
+        current = progress.get("current_stage_name", progress.get("current_stage", "Unknown"))
+        text = f"📊 TRIAL STATUS\n\nCurrent Stage: {current}\nProgress: {progress.get('completed_count', 0)}/{progress.get('total_stages', 13)} stages"
         
         await self._send_message(uid, msg.get("type"), text)
 

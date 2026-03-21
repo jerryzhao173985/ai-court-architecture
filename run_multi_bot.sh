@@ -6,23 +6,25 @@ echo "VERITAS Multi-Bot Service"
 echo "================================"
 echo ""
 
+# Activate virtual environment
+if [ -d venv ]; then
+    source venv/bin/activate
+fi
+
 # Check configuration
 echo "Testing configuration..."
-python test_multi_bot_config.py
+PYTHONPATH=src python -c "from config import load_config; cfg = load_config(); roles = [r for r, b in [('clerk', cfg.luffa.clerk_bot), ('prosecution', cfg.luffa.prosecution_bot), ('defence', cfg.luffa.defence_bot), ('fact_checker', cfg.luffa.fact_checker_bot), ('judge', cfg.luffa.judge_bot)] if b]; print(f'✅ {len(roles)} bots configured: {', '.join(roles)}')"
 
 if [ $? -ne 0 ]; then
     echo ""
     echo "❌ Configuration test failed"
-    echo "Please run: python setup_bots.py"
     exit 1
 fi
 
-echo ""
-echo "✓ Configuration valid"
 echo ""
 echo "Starting multi-bot service..."
 echo "Press Ctrl+C to stop"
 echo ""
 
 # Start the service
-python src/multi_bot_service.py
+cd src && python multi_bot_service.py

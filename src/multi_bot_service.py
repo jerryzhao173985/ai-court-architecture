@@ -5,7 +5,7 @@ import logging
 from typing import Optional, Dict
 from datetime import datetime
 
-from multi_bot_client import MultiBotClient
+from multi_bot_client_sdk import MultiBotSDKClient as MultiBotClient
 from orchestrator import ExperienceOrchestrator
 from state_machine import ExperienceState
 from config import load_config
@@ -51,26 +51,46 @@ class MultiBotService:
         if not self.config.luffa.bot_enabled:
             logger.error("Luffa Bot is disabled. Set LUFFA_BOT_ENABLED=true in .env")
             return
-        
+
         # Check if we have at least the clerk bot
         if not self.multi_bot.has_bot_for_role("clerk"):
             logger.error("Clerk bot not configured. Set LUFFA_BOT_CLERK_UID and LUFFA_BOT_CLERK_SECRET")
             return
-        
+
         logger.info("Starting VERITAS Multi-Bot service...")
+        logger.info(f"API endpoint: {self.multi_bot.base_url}")
         logger.info(f"Configured roles: {self.multi_bot.get_configured_roles()}")
+
+        # Verify bot authentication before starting
+        logger.info("Verifying bot credentials...")
+        auth_results = await self.multi_bot.verify_all_bots()
+
+        failed_bots = [role for role, ok in auth_results.items() if not ok]
+        passed_bots = [role for role, ok in auth_results.items() if ok]
+
+        if failed_bots:
+            logger.error(f"AUTH FAILED for: {', '.join(failed_bots)}")
+            logger.error("Bot secrets may be expired. Regenerate at https://robot.luffa.im")
+            if "clerk" in failed_bots:
+                logger.error("Clerk bot auth failed — cannot start service without it.")
+                return
+            logger.warning(f"Continuing with working bots: {', '.join(passed_bots)}")
+        else:
+            logger.info(f"All {len(passed_bots)} bots authenticated successfully")
+
         self.running = True
-        
-        # Poll messages from Clerk bot (main orchestrator)
+        logger.info("Polling for messages every 1 second...")
+
+        # Poll ALL bots — Luffa delivers group messages to each bot independently
         while self.running:
             try:
-                messages = await self.multi_bot.poll_messages("clerk")
-                
-                for msg in messages:
-                    await self.handle_message(msg)
-                
+                for role in self.multi_bot.get_configured_roles():
+                    messages = await self.multi_bot.poll_messages(role)
+                    for msg in messages:
+                        await self.handle_message(msg)
+
                 await asyncio.sleep(1)
-            
+
             except Exception as e:
                 logger.error(f"Error in polling loop: {e}")
                 await asyncio.sleep(5)
@@ -79,10 +99,14 @@ class MultiBotService:
         """Handle incoming message."""
         text = msg.get("text", "").strip()
         group_id = msg.get("gid")  # Group ID
-        sender_uid = msg.get("uid")  # User ID
+        sender_uid = msg.get("sender_uid") or msg.get("uid")  # Actual sender, not group ID
         msg_type = msg.get("type", 1)  # 1=Group
-        
+
         if not text or not group_id:
+            return
+
+        # Ignore messages from our own bots (they appear in other bots' polls)
+        if sender_uid in self.multi_bot.bot_uids:
             return
         
         # Handle commands
@@ -114,7 +138,10 @@ class MultiBotService:
         
         elif cmd == "/help":
             await self.show_help(group_id)
-        
+
+        elif cmd == "/stop":
+            await self.stop_trial(group_id, sender_uid)
+
         else:
             await self.multi_bot.send_as_agent(
                 "clerk",
@@ -176,7 +203,7 @@ class MultiBotService:
                 "clerk",
                 group_id,
                 f"🎭 THE TRIAL BEGINS\n\n{hook_content}",
-                button=[{"name": "Continue", "selector": "/continue", "isHidden": "0"}]
+                buttons=[{"name": "Continue", "selector": "/continue", "isHidden": "0"}]
             )
 
     async def continue_trial(self, group_id: str, sender_uid: str):
@@ -193,25 +220,35 @@ class MultiBotService:
         
         current_state = orchestrator.state_machine.current_state
         
-        # Handle deliberation
+        # Handle deliberation — guide user clearly
         if current_state == ExperienceState.JURY_DELIBERATION:
             await self.multi_bot.send_as_agent(
                 "clerk",
                 group_id,
-                "⚖️ You are deliberating. Share your thoughts or type /vote to cast your verdict."
+                "⚖️ DELIBERATION IN PROGRESS\n\n"
+                "The jury is deliberating. Share your thoughts on the evidence — the AI jurors will respond.\n\n"
+                "Type /evidence to review the evidence board.\n"
+                "When ready, type /vote guilty OR /vote not_guilty",
+                buttons=[
+                    {"name": "View Evidence", "selector": "/evidence", "isHidden": "0"},
+                    {"name": "Vote Guilty", "selector": "/vote guilty", "isHidden": "1"},
+                    {"name": "Vote Not Guilty", "selector": "/vote not_guilty", "isHidden": "1"}
+                ],
+                dismiss_type="dismiss"
             )
             return
-        
+
         # Handle voting
         if current_state == ExperienceState.ANONYMOUS_VOTE:
             await self.multi_bot.send_as_agent(
                 "clerk",
                 group_id,
                 "⚖️ TIME TO VOTE\n\nType: /vote guilty OR /vote not_guilty",
-                button=[
+                buttons=[
                     {"name": "Vote Guilty", "selector": "/vote guilty", "isHidden": "1"},
                     {"name": "Vote Not Guilty", "selector": "/vote not_guilty", "isHidden": "1"}
-                ]
+                ],
+                dismiss_type="dismiss"
             )
             return
         
@@ -242,14 +279,19 @@ class MultiBotService:
             await self.multi_bot.send_as_agent(
                 "clerk",
                 group_id,
-                f"⚖️ JURY DELIBERATION\n\n{prompt}\n\nShare your thoughts. Type /evidence to view evidence.",
-                button=[
+                f"🗣️ JURY DELIBERATION\n\n{prompt}\n\n"
+                f"You are now in the jury chamber with 7 AI jurors.\n"
+                f"Share your thoughts on the case — the AI jurors will respond.\n\n"
+                f"Type /evidence to review the evidence board.\n"
+                f"When ready: /vote guilty OR /vote not_guilty",
+                buttons=[
                     {"name": "View Evidence", "selector": "/evidence", "isHidden": "0"},
-                    {"name": "Ready to Vote", "selector": "/vote", "isHidden": "0"}
+                    {"name": "Vote Guilty", "selector": "/vote guilty", "isHidden": "1"},
+                    {"name": "Vote Not Guilty", "selector": "/vote not_guilty", "isHidden": "1"}
                 ]
             )
             return
-        
+
         # Prompt to continue
         next_state = orchestrator.state_machine.get_next_state()
         if next_state:
@@ -257,7 +299,7 @@ class MultiBotService:
                 "clerk",
                 group_id,
                 "Type /continue to proceed.",
-                button=[{"name": "Continue", "selector": "/continue", "isHidden": "0"}]
+                buttons=[{"name": "Continue", "selector": "/continue", "isHidden": "0"}]
             )
 
     async def send_agent_response(self, group_id: str, response: dict):
@@ -333,10 +375,11 @@ class MultiBotService:
                     "clerk",
                     group_id,
                     "⏰ Deliberation time is up!\n\nType: /vote guilty OR /vote not_guilty",
-                    button=[
+                    buttons=[
                         {"name": "Vote Guilty", "selector": "/vote guilty", "isHidden": "1"},
                         {"name": "Vote Not Guilty", "selector": "/vote not_guilty", "isHidden": "1"}
-                    ]
+                    ],
+                    dismiss_type="dismiss"
                 )
 
     async def handle_vote(self, group_id: str, sender_uid: str, vote: Optional[str]):
@@ -365,7 +408,20 @@ class MultiBotService:
         vote_result = await orchestrator.submit_vote(vote)
         
         if vote_result["success"]:
-            await self.send_dual_reveal(group_id, vote_result["dual_reveal"], sender_uid)
+            if "dual_reveal" in vote_result:
+                await self.send_dual_reveal(group_id, vote_result["dual_reveal"], sender_uid)
+            else:
+                # Fallback when reasoning evaluation fails
+                verdict_data = vote_result.get("verdict", {})
+                v = verdict_data.get("verdict", "unknown").replace("_", " ").upper()
+                await self.multi_bot.send_as_agent(
+                    "clerk", group_id,
+                    f"⚖️ **THE VERDICT**\n\nThe jury finds the defendant: **{v}**\n\n"
+                    f"(Detailed reasoning assessment is temporarily unavailable.)\n\n"
+                    f"Type /start to begin a new trial.",
+                    buttons=[{"name": "Start New Trial", "selector": "/start", "isHidden": "0"}]
+                )
+                self._cleanup_user_session(sender_uid, group_id)
 
     async def send_dual_reveal(self, group_id: str, dual_reveal: dict, sender_uid: str):
         """Send dual reveal sequence from appropriate bots."""
@@ -411,7 +467,7 @@ class MultiBotService:
         
         for juror in dual_reveal["jurorReveal"]:
             if juror["type"] != "human":
-                persona = juror.get("persona", "").replace("_", " ").title()
+                persona = (juror.get("persona") or "").replace("_", " ").title()
                 vote_text = juror["vote"].replace("_", " ").title()
                 
                 juror_text += f"• **{juror['jurorId']}**: {persona or 'Juror'} - Voted {vote_text}\n"
@@ -423,16 +479,16 @@ class MultiBotService:
             "clerk",
             group_id,
             "✅ **Trial complete!** Thank you for participating.\n\nType /start to begin a new trial.",
-            button=[{"name": "Start New Trial", "selector": "/start", "isHidden": "0"}]
+            buttons=[{"name": "Start New Trial", "selector": "/start", "isHidden": "0"}]
         )
         
         # Cleanup
         self._cleanup_user_session(sender_uid, group_id)
 
     async def show_evidence(self, group_id: str, sender_uid: str):
-        """Show evidence board."""
+        """Show evidence board with full item details."""
         orchestrator = self._get_user_orchestrator(sender_uid)
-        
+
         if not orchestrator:
             await self.multi_bot.send_as_agent(
                 "clerk",
@@ -440,19 +496,49 @@ class MultiBotService:
                 "⚠️ No active trial."
             )
             return
-        
+
         evidence_board = orchestrator.get_evidence_board()
-        
-        text = "📋 **EVIDENCE BOARD**\n\n"
-        for item in evidence_board["timeline"]:
-            text += f"• **{item['title']}** ({item['type']})\n  _{item['timestamp']}_\n  {item['description'][:100]}...\n\n"
-        
-        await self.multi_bot.send_as_agent("clerk", group_id, text)
+
+        if "error" in evidence_board:
+            await self.multi_bot.send_as_agent("clerk", group_id, "⚠️ Evidence board not available yet.")
+            return
+
+        # Use "items" (full EvidenceItem data), not "timeline" (which lacks description)
+        items = evidence_board.get("items", [])
+
+        if not items:
+            await self.multi_bot.send_as_agent("clerk", group_id, "📋 No evidence items available.")
+            return
+
+        # Split by side — mirrors how evidence is presented in a real courtroom
+        prosecution_items = [i for i in items if i.get("presentedBy") == "prosecution"]
+        defence_items = [i for i in items if i.get("presentedBy") == "defence"]
+
+        type_label = {"physical": "Physical", "testimonial": "Testimony", "documentary": "Document"}
+
+        # Send prosecution evidence
+        if prosecution_items:
+            text = "📋 EVIDENCE BOARD\n\n👔 PROSECUTION EVIDENCE\n"
+            for item in prosecution_items:
+                text += f"\n• {item['title']} ({type_label.get(item.get('type', ''), item.get('type', ''))})\n"
+                text += f"  {item.get('description', '')}\n"
+                text += f"  Significance: {item.get('significance', '')}\n"
+            await self.multi_bot.send_as_agent("clerk", group_id, text)
+            await asyncio.sleep(1)
+
+        # Send defence evidence
+        if defence_items:
+            text = "🛡️ DEFENCE EVIDENCE\n"
+            for item in defence_items:
+                text += f"\n• {item['title']} ({type_label.get(item.get('type', ''), item.get('type', ''))})\n"
+                text += f"  {item.get('description', '')}\n"
+                text += f"  Significance: {item.get('significance', '')}\n"
+            await self.multi_bot.send_as_agent("clerk", group_id, text)
 
     async def show_status(self, group_id: str, sender_uid: str):
         """Show trial status."""
         orchestrator = self._get_user_orchestrator(sender_uid)
-        
+
         if not orchestrator:
             await self.multi_bot.send_as_agent(
                 "clerk",
@@ -460,20 +546,49 @@ class MultiBotService:
                 "⚠️ No active trial. Use /start to begin."
             )
             return
-        
+
         progress = orchestrator.get_progress()
-        current = progress["currentStage"].replace("_", " ").title()
-        
-        text = f"📊 **TRIAL STATUS**\n\n**Current Stage**: {current}\n**Progress**: {progress['completedStages']}/{progress['totalStages']} stages"
-        
+
+        if "error" in progress:
+            await self.multi_bot.send_as_agent("clerk", group_id, "⚠️ Status unavailable.")
+            return
+
+        # Keys from trial_stages.py: current_stage, current_stage_name, completed_count, total_stages, progress_percentage
+        stage_name = progress.get("current_stage_name", progress.get("current_stage", "Unknown"))
+        completed = progress.get("completed_count", 0)
+        total = progress.get("total_stages", 13)
+        pct = progress.get("progress_percentage", 0)
+
+        text = f"📊 TRIAL STATUS\n\nCurrent Stage: {stage_name}\nProgress: {completed}/{total} stages ({pct}%)"
+
         await self.multi_bot.send_as_agent("clerk", group_id, text)
+
+    async def stop_trial(self, group_id: str, sender_uid: str):
+        """Stop and clear current trial."""
+        orchestrator = self._get_user_orchestrator(sender_uid)
+
+        if not orchestrator:
+            await self.multi_bot.send_as_agent(
+                "clerk",
+                group_id,
+                "No active trial to stop."
+            )
+            return
+
+        self._cleanup_user_session(sender_uid, group_id)
+        await self.multi_bot.send_as_agent(
+            "clerk",
+            group_id,
+            "⚖️ Trial stopped and session cleared.\n\nType /start to begin a new trial."
+        )
 
     async def show_help(self, group_id: str):
         """Show help message."""
-        help_text = """🎭 **VERITAS COURTROOM EXPERIENCE**
+        help_text = """🎭 VERITAS COURTROOM EXPERIENCE
 
-**Commands:**
+Commands:
 • /start - Begin a new trial
+• /stop - Stop current trial
 • /continue - Advance to next stage
 • /vote guilty - Vote guilty
 • /vote not_guilty - Vote not guilty
@@ -534,7 +649,7 @@ Each agent is a separate bot for a realistic courtroom experience!"""
 async def main():
     """Main entry point."""
     service = MultiBotService()
-    
+
     try:
         await service.start()
     except KeyboardInterrupt:
@@ -543,6 +658,8 @@ async def main():
     except Exception as e:
         logger.error(f"Service error: {e}")
         raise
+    finally:
+        await service.multi_bot.close()
 
 
 if __name__ == "__main__":
