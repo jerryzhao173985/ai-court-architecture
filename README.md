@@ -69,8 +69,11 @@ src/                             Core source code
 ├── evidence_board.py            Chronological timeline with filtering
 ├── reasoning_evaluator.py       Evidence tracking, regex fallacy detection, scoring
 ├── dual_reveal.py               Assembles verdict + truth + assessment + juror reveal
-├── llm_service.py               Dual-provider LLM client (OpenAI / Anthropic)
+├── llm_service.py               Dual-provider LLM client with connection pooling, rate limiting, retry
+├── metrics.py                   Performance monitoring (agent times, session stats, verdict tracking)
+├── cache.py                     Three-tier TTL cache (fallback 24h, case 1h, agent 5min)
 ├── session.py                   UserSession, SessionStore, ReasoningAssessment
+├── session_async.py             Async session store with PostgreSQL/MongoDB backends
 ├── luffa_client.py              Single-bot Luffa HTTP client (legacy)
 ├── multi_bot_client.py          Per-agent Luffa bot client (legacy)
 ├── luffa_bot_service.py         Single-bot service runtime (legacy)
@@ -83,7 +86,8 @@ src/                             Core source code
 └── main.py                      Basic automated demo
 
 fixtures/                        Case data
-├── blackthorn-hall-001.json     Flagship case (murder mystery, 7 evidence items)
+├── blackthorn-hall-001.json     Murder case — Crown v. Marcus Ashford (7 evidence items)
+├── digital-deception-002.json   Fraud case — Crown v. Sarah Chen (5 evidence items)
 └── sample_case.json             Minimal template for new cases
 
 scripts/                         Utilities
@@ -135,13 +139,16 @@ API docs at `http://localhost:8000/docs`.
 ```
 
 Commands in the group chat:
-- `/start` — Begin trial
+- `/start [case_id]` — Begin trial (random case if no ID)
+- `/cases` — List available cases with difficulty
 - `/continue` — Advance stages (each bot speaks in turn)
 - `/evidence` — View evidence board (split by prosecution/defence)
 - `/vote guilty` or `/vote not_guilty` — Cast verdict
 - `/status` — Check progress
 - `/stop` — End current trial
 - `/help` — Show commands
+- `/metrics` — Performance stats (admin only)
+- `/sessions` — Active sessions (admin only)
 
 Prosecution Bot argues for guilt, Defence Bot creates doubt, Judge Bot provides legal instructions. The service polls all 5 bots, deduplicates messages, and filters bot echo to prevent loops.
 
@@ -168,7 +175,7 @@ MAX_EXPERIENCE_MINUTES=20
 ## Tests
 
 ```bash
-pytest tests/unit/ -v                    # Unit tests, no API key needed
+pytest tests/unit/ -v                    # 244 unit tests, no API key needed
 pytest tests/integration/ -v             # Integration tests, requires API keys
 ./verify_system.sh                       # Full system verification
 ```
@@ -196,7 +203,9 @@ Create a JSON file in `fixtures/` following the structure of `blackthorn-hall-00
 
 **Working:** 14-state trial flow, 5 AI agents with case-specific prompts, 8-juror deliberation with rich personas, dual-provider LLM (OpenAI + Anthropic), LLM-powered fact checking, complexity-adaptive prompts, reasoning evaluation, dual reveal, REST + WebSocket API, multi-bot Luffa integration (5 bots polling all queues with dedup and echo filtering), evidence board with prosecution/defence split, bot auth verification on startup, file-based session persistence, error handling with fallbacks.
 
-**Planned:** Separate AI juror bots (one per persona), Witness bots, LLM-powered AI voting (currently heuristic), more cases, web frontend.
+**Recent additions:** LLM-based juror voting (replaces deterministic heuristic), evidence-aware deliberation, juror rotation (2-of-3 per round), juror persona display, `/start [case_id]` case selection with random fallback, `/cases` listing, prosecution/defence emphasis variation, post-trial case statistics, session timeout (30-min warn / 60-min cleanup), bot failover (retry + clerk fallback), `/metrics` and `/sessions` admin commands, rate limit user feedback.
+
+**Planned:** Separate AI juror bots (one per persona), witness bots, more cases, web frontend.
 
 ## Documentation
 

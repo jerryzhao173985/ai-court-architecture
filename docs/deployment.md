@@ -237,12 +237,16 @@ Chat:
 
 | Command | Description | Example |
 |---------|-------------|---------|
-| `/start` | Begin new trial | `/start` |
+| `/start [case-id]` | Begin new trial (random if no ID) | `/start` or `/start digital-deception-002` |
+| `/cases` | List available cases with difficulty | `/cases` |
 | `/continue` | Advance to next stage | `/continue` |
 | `/vote <verdict>` | Cast your vote | `/vote guilty` or `/vote not_guilty` |
 | `/evidence` | View evidence board | `/evidence` |
 | `/status` | Check trial progress | `/status` |
+| `/stop` | End current trial | `/stop` |
 | `/help` | Show help message | `/help` |
+| `/metrics` | Performance stats (admin only) | `/metrics` |
+| `/sessions` | Active sessions (admin only) | `/sessions` |
 
 ## What Makes This Special
 

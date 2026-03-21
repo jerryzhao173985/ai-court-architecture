@@ -291,19 +291,19 @@ Transform the functional bot into a polished, immersive group chat courtroom exp
 
 ### Must Have:
 - [x] Bot connects to Luffa
-- [ ] Characters have names
-- [ ] Messages formatted well
-- [ ] Multi-user voting works
-- [ ] Full trial completes
-- [ ] Errors handled
-- [ ] Documentation complete
+- [x] Characters have names (juror personas with emojis — Phase 25.4)
+- [x] Messages formatted well (role-specific emojis, structured reveal)
+- [x] Multi-user voting works (LLM-based juror voting — Phase 25.1)
+- [x] Full trial completes (14-state FSM, dual reveal)
+- [x] Errors handled (bot failover, rate limit feedback, session timeout)
+- [x] Documentation complete
 
 ### Nice to Have:
 - [ ] Auto-advance
 - [ ] Intent detection
 - [ ] Adaptive responses
 - [ ] Question handling
-- [ ] Statistics tracking
+- [x] Statistics tracking (post-trial case stats — Phase 26.4, /metrics admin command — Phase 27.3)
 
 ---
 

@@ -10,7 +10,7 @@ A **production-ready multi-bot courtroom experience** for Luffa group chat with:
 - ✅ Multi-user session management
 - ✅ Interactive buttons and commands
 - ✅ Comprehensive error handling
-- ✅ Full test coverage (100/100 tests passing)
+- ✅ Full test coverage (244 unit tests passing)
 
 ## 🏗️ Architecture at a Glance
 
@@ -198,7 +198,7 @@ class MultiBotService:
 
 ### Prerequisites
 
-- [x] Python 3.11+
+- [x] Python >=3.10
 - [x] OpenAI API key
 - [x] 5 Luffa bots created
 - [x] Bot credentials in `.env`
@@ -217,12 +217,16 @@ python test_multi_bot_config.py
 ### In Luffa Group
 
 ```
-/start    → Begin trial
-/continue → Advance stages
-/vote     → Cast verdict
-/evidence → View evidence
-/status   → Check progress
-/help     → Show commands
+/start [case-id] → Begin trial (random case if no ID)
+/cases           → List available cases with difficulty
+/continue        → Advance stages
+/vote            → Cast verdict
+/evidence        → View evidence
+/status          → Check progress
+/stop            → End current trial
+/help            → Show commands
+/metrics         → Performance stats (admin)
+/sessions        → Active sessions (admin)
 ```
 
 ## 📈 Scalability
@@ -265,7 +269,7 @@ python test_multi_bot_config.py
 
 # Unit tests
 python -m pytest tests/unit/ -v
-# ✅ 100/100 tests passing
+# ✅ 244 unit tests passing
 
 # Integration test
 python validate_fact_checker_integration.py
@@ -371,7 +375,7 @@ Total Bots Configured: 5/5 required
 ### Tests ✅
 ```bash
 $ python -m pytest tests/unit/ -v
-✅ 100/100 tests passing
+✅ 244 unit tests passing
 ```
 
 ### Integration ✅
@@ -392,7 +396,7 @@ $ python validate_fact_checker_integration.py
 | Fact Checker | ✅ Integrated | LLM-powered, wired into flow |
 | Dual Reveal | ✅ Implemented | 4-part sequence |
 | Error Handling | ✅ Implemented | Graceful degradation |
-| Tests | ✅ Passing | 100/100 unit tests |
+| Tests | ✅ Passing | 244 unit tests |
 | Documentation | ✅ Complete | 8 comprehensive guides |
 
 ## 📋 Deployment Checklist

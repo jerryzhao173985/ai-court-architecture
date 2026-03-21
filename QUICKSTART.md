@@ -68,7 +68,9 @@ Configured roles: clerk, prosecution, defence, fact_checker, judge
 
 **Start a trial:**
 ```
-/start
+/start                         # Random case
+/start digital-deception-002   # Specific case
+/cases                         # List available cases
 ```
 
 The Clerk bot will greet you and present the hook scene.
