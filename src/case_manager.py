@@ -3,8 +3,12 @@
 import json
 from pathlib import Path
 from typing import Optional
+import logging
 
 from models import CaseContent, EvidenceItem
+from cache import get_response_cache
+
+logger = logging.getLogger("veritas")
 
 
 class ValidationResult:
@@ -39,7 +43,7 @@ class CaseManager:
             cases_path = Path("..") / cases_directory
         
         self.cases_directory = cases_path
-        self._loaded_cases: dict[str, CaseContent] = {}
+        self._cache = get_response_cache()
     
     def load_case(self, case_id: str) -> CaseContent:
         """Load and validate a case from JSON file.
@@ -55,9 +59,11 @@ class CaseManager:
             ValueError: If case content is invalid
             json.JSONDecodeError: If JSON is malformed
         """
-        # Check cache first
-        if case_id in self._loaded_cases:
-            return self._loaded_cases[case_id]
+        # Check cache first (with TTL)
+        cached_case = self._cache.get_case_content(case_id)
+        if cached_case is not None:
+            logger.debug(f"Loaded case {case_id} from cache")
+            return cached_case
         
         # Construct file path
         case_file = self.cases_directory / f"{case_id}.json"
@@ -77,8 +83,9 @@ class CaseManager:
         if not validation_result.is_valid:
             raise ValueError(f"Case validation failed: {', '.join(validation_result.errors)}")
         
-        # Cache the loaded case
-        self._loaded_cases[case_id] = case_content
+        # Cache the loaded case with TTL
+        self._cache.set_case_content(case_id, case_content)
+        logger.info(f"Loaded and cached case {case_id}")
         
         return case_content
     

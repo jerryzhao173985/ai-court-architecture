@@ -179,24 +179,28 @@ class MultiBotService:
         
         # Initialize
         init_result = await orchestrator.initialize()
-        
+
         if not init_result["success"]:
+            # Clean up the uid mapping created by _create_session_id
+            self.uid_to_session.pop(sender_uid, None)
+            if group_id in self.group_users:
+                self.group_users[group_id].discard(sender_uid)
             await self.multi_bot.send_as_agent(
                 "clerk",
                 group_id,
                 f"❌ Failed to start trial: {init_result.get('error')}"
             )
             return
-        
+
         self.active_sessions[session_id] = orchestrator
-        
+
         # Send greeting from Clerk
         greeting = init_result["greeting"]["content"]
         await self.multi_bot.send_as_agent("clerk", group_id, greeting)
-        
+
         # Start hook scene
         start_result = await orchestrator.start_experience()
-        
+
         if start_result["success"]:
             hook_content = start_result["hook_content"]["content"]
             await self.multi_bot.send_as_agent(
@@ -205,6 +209,13 @@ class MultiBotService:
                 f"🎭 THE TRIAL BEGINS\n\n{hook_content}",
                 buttons=[{"name": "Continue", "selector": "/continue", "isHidden": "0"}]
             )
+        else:
+            await self.multi_bot.send_as_agent(
+                "clerk",
+                group_id,
+                f"❌ Failed to start trial: {start_result.get('error')}\n\nType /start to try again."
+            )
+            await self._cleanup_user_session(sender_uid, group_id)
 
     async def continue_trial(self, group_id: str, sender_uid: str):
         """Continue to next trial stage."""
@@ -421,69 +432,84 @@ class MultiBotService:
                     f"Type /start to begin a new trial.",
                     buttons=[{"name": "Start New Trial", "selector": "/start", "isHidden": "0"}]
                 )
-                self._cleanup_user_session(sender_uid, group_id)
+                await self._cleanup_user_session(sender_uid, group_id)
+        else:
+            await self.multi_bot.send_as_agent(
+                "clerk", group_id,
+                f"❌ Vote processing failed: {vote_result.get('error', 'Unknown error')}\n\n"
+                f"Type /vote guilty or /vote not_guilty to try again."
+            )
 
     async def send_dual_reveal(self, group_id: str, dual_reveal: dict, sender_uid: str):
         """Send dual reveal sequence from appropriate bots."""
-        # 1. Verdict announcement from Clerk
-        verdict = dual_reveal["verdict"]
-        verdict_text = verdict["verdict"].replace("_", " ").upper()
-        
-        await self.multi_bot.send_as_agent(
-            "clerk",
-            group_id,
-            f"⚖️ **THE VERDICT**\n\nThe jury finds the defendant: **{verdict_text}**\n\n📊 Vote: {verdict['guiltyCount']} guilty, {verdict['notGuiltyCount']} not guilty"
-        )
-        await asyncio.sleep(3)
-        
-        # 2. Ground truth from Judge
-        truth = dual_reveal["groundTruth"]
-        actual = truth["actualVerdict"].replace("_", " ").upper()
-        
-        await self.multi_bot.send_as_agent(
-            "judge",
-            group_id,
-            f"🔍 **THE TRUTH**\n\nActual verdict: **{actual}**\n\n{truth['explanation']}"
-        )
-        await asyncio.sleep(3)
-        
-        # 3. Reasoning assessment from Clerk
-        assessment = dual_reveal["reasoningAssessment"]
-        category = assessment["category"].replace("_", " ").title()
-        
-        feedback_text = f"""📊 **REASONING ASSESSMENT**
+        try:
+            # 1. Verdict announcement from Clerk
+            verdict = dual_reveal["verdict"]
+            verdict_text = verdict["verdict"].replace("_", " ").upper()
+
+            await self.multi_bot.send_as_agent(
+                "clerk",
+                group_id,
+                f"⚖️ **THE VERDICT**\n\nThe jury finds the defendant: **{verdict_text}**\n\n📊 Vote: {verdict['guiltyCount']} guilty, {verdict['notGuiltyCount']} not guilty"
+            )
+            await asyncio.sleep(3)
+
+            # 2. Ground truth from Judge
+            truth = dual_reveal["groundTruth"]
+            actual = truth["actualVerdict"].replace("_", " ").upper()
+
+            await self.multi_bot.send_as_agent(
+                "judge",
+                group_id,
+                f"🔍 **THE TRUTH**\n\nActual verdict: **{actual}**\n\n{truth['explanation']}"
+            )
+            await asyncio.sleep(3)
+
+            # 3. Reasoning assessment from Clerk
+            assessment = dual_reveal["reasoningAssessment"]
+            category = assessment["category"].replace("_", " ").title()
+
+            feedback_text = f"""📊 **REASONING ASSESSMENT**
 
 **Category**: {category}
 **Evidence Score**: {assessment['evidenceScore']:.2f}/1.0
 **Coherence Score**: {assessment['coherenceScore']:.2f}/1.0
 
 {assessment['feedback']}"""
-        
-        await self.multi_bot.send_as_agent("clerk", group_id, feedback_text)
-        await asyncio.sleep(3)
-        
-        # 4. Juror reveal from Clerk
-        juror_text = "🎭 **AI JUROR IDENTITIES**\n\n"
-        
-        for juror in dual_reveal["jurorReveal"]:
-            if juror["type"] != "human":
-                persona = (juror.get("persona") or "").replace("_", " ").title()
-                vote_text = juror["vote"].replace("_", " ").title()
-                
-                juror_text += f"• **{juror['jurorId']}**: {persona or 'Juror'} - Voted {vote_text}\n"
-        
-        await self.multi_bot.send_as_agent("clerk", group_id, juror_text)
-        
-        # Complete
-        await self.multi_bot.send_as_agent(
-            "clerk",
-            group_id,
-            "✅ **Trial complete!** Thank you for participating.\n\nType /start to begin a new trial.",
-            buttons=[{"name": "Start New Trial", "selector": "/start", "isHidden": "0"}]
-        )
-        
-        # Cleanup
-        self._cleanup_user_session(sender_uid, group_id)
+
+            await self.multi_bot.send_as_agent("clerk", group_id, feedback_text)
+            await asyncio.sleep(3)
+
+            # 4. Juror reveal from Clerk
+            juror_text = "🎭 **AI JUROR IDENTITIES**\n\n"
+
+            for juror in dual_reveal["jurorReveal"]:
+                if juror["type"] != "human":
+                    persona = (juror.get("persona") or "").replace("_", " ").title()
+                    vote_text = juror["vote"].replace("_", " ").title()
+
+                    juror_text += f"• **{juror['jurorId']}**: {persona or 'Juror'} - Voted {vote_text}\n"
+
+            await self.multi_bot.send_as_agent("clerk", group_id, juror_text)
+
+            # Complete
+            await self.multi_bot.send_as_agent(
+                "clerk",
+                group_id,
+                "✅ **Trial complete!** Thank you for participating.\n\nType /start to begin a new trial.",
+                buttons=[{"name": "Start New Trial", "selector": "/start", "isHidden": "0"}]
+            )
+        except Exception as e:
+            logger.error(f"Error during dual reveal for {sender_uid}: {e}")
+            try:
+                await self.multi_bot.send_as_agent(
+                    "clerk", group_id,
+                    "⚠️ An error occurred during the reveal. The trial is now complete.\n\nType /start to begin a new trial."
+                )
+            except Exception:
+                pass  # Best effort — don't let notification failure prevent cleanup
+        finally:
+            await self._cleanup_user_session(sender_uid, group_id)
 
     async def show_evidence(self, group_id: str, sender_uid: str):
         """Show evidence board with full item details."""
@@ -575,7 +601,7 @@ class MultiBotService:
             )
             return
 
-        self._cleanup_user_session(sender_uid, group_id)
+        await self._cleanup_user_session(sender_uid, group_id)
         await self.multi_bot.send_as_agent(
             "clerk",
             group_id,
@@ -626,12 +652,26 @@ Each agent is a separate bot for a realistic courtroom experience!"""
             return self.active_sessions.get(session_id)
         return None
 
-    def _cleanup_user_session(self, uid: str, group_id: str):
+    async def _cleanup_user_session(self, uid: str, group_id: str):
         """Clean up user session."""
         session_id = self.uid_to_session.get(uid)
         
         if session_id:
+            # Cleanup orchestrator if exists
             if session_id in self.active_sessions:
+                orchestrator = self.active_sessions[session_id]
+                try:
+                    # Determine if session was completed — bot services end at DUAL_REVEAL
+                    # (complete_experience() which transitions to COMPLETED is only used by API/demo)
+                    completed = (orchestrator.user_session and
+                               orchestrator.user_session.current_state in (
+                                   ExperienceState.DUAL_REVEAL,
+                                   ExperienceState.COMPLETED
+                               ))
+                    await orchestrator.cleanup(completed=completed)
+                except Exception as e:
+                    logger.error(f"Failed to cleanup orchestrator for session {session_id}: {e}")
+                
                 del self.active_sessions[session_id]
             del self.uid_to_session[uid]
         
@@ -640,9 +680,24 @@ Each agent is a separate bot for a realistic courtroom experience!"""
             if not self.group_users[group_id]:
                 del self.group_users[group_id]
 
+    async def shutdown(self):
+        """Gracefully shut down the service, cleaning up all active sessions."""
+        logger.info("Shutting down Multi-Bot service...")
+        self.running = False
+
+        # Cleanup all active sessions
+        for session_id, orchestrator in list(self.active_sessions.items()):
+            try:
+                await orchestrator.cleanup(completed=False)
+            except Exception as e:
+                logger.error(f"Failed to cleanup session {session_id} during shutdown: {e}")
+
+        self.active_sessions.clear()
+        self.uid_to_session.clear()
+        self.group_users.clear()
+
     def stop(self):
-        """Stop the service."""
-        logger.info("Stopping Multi-Bot service...")
+        """Stop the service (sets running flag — use shutdown() for graceful cleanup)."""
         self.running = False
 
 
@@ -654,11 +709,11 @@ async def main():
         await service.start()
     except KeyboardInterrupt:
         logger.info("Received shutdown signal")
-        service.stop()
     except Exception as e:
         logger.error(f"Service error: {e}")
         raise
     finally:
+        await service.shutdown()
         await service.multi_bot.close()
 
 

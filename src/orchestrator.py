@@ -20,6 +20,7 @@ from error_handling import ErrorHandler, StatePreservation
 from llm_service import LLMService
 from luffa_client import LuffaAPIClient
 from config import AppConfig, load_config
+from metrics import get_metrics_collector
 
 logger = logging.getLogger("veritas")
 
@@ -84,6 +85,9 @@ class ExperienceOrchestrator:
         self._polling_task: Optional[asyncio.Task] = None
         self._polling_active = False
         self._message_handlers = {}
+        
+        # Session tracking state
+        self._session_metrics_ended = False
 
     async def initialize(self) -> dict:
         """
@@ -93,6 +97,10 @@ class ExperienceOrchestrator:
             Initialization result with greeting
         """
         try:
+            # Start session tracking
+            metrics_collector = get_metrics_collector()
+            await metrics_collector.start_session(self.session_id, self.case_id)
+            
             # Load case content
             self.case_content = self.case_manager.load_case(self.case_id)
             
@@ -138,6 +146,14 @@ class ExperienceOrchestrator:
             }
         
         except Exception as e:
+            # End session tracking on failure
+            metrics_collector = get_metrics_collector()
+            await metrics_collector.end_session(
+                self.session_id,
+                completed=False,
+                final_state="initialization_failed"
+            )
+            
             self.error_handler.log_error(
                 error_type="initialization_failure",
                 component="orchestrator",
@@ -221,6 +237,11 @@ class ExperienceOrchestrator:
                 ExperienceState.JUDGE_SUMMING_UP
             ]:
                 agent_responses = await self.trial_orchestrator.execute_stage(next_state)
+                
+                # Track agent calls
+                metrics_collector = get_metrics_collector()
+                for _ in agent_responses:
+                    await metrics_collector.increment_session_agent_calls(self.session_id)
                 
                 # Update evidence board highlighting during evidence presentation
                 if next_state == ExperienceState.EVIDENCE_PRESENTATION:
@@ -412,6 +433,15 @@ class ExperienceOrchestrator:
             # Save final progress
             self._save_progress()
             
+            # End session tracking
+            metrics_collector = get_metrics_collector()
+            await metrics_collector.end_session(
+                self.session_id,
+                completed=True,
+                final_state=ExperienceState.COMPLETED.value
+            )
+            self._session_metrics_ended = True
+            
             return {
                 "success": True,
                 "message": "Experience completed. Thank you for your participation.",
@@ -481,6 +511,10 @@ class ExperienceOrchestrator:
         Returns:
             Error response
         """
+        # End session tracking on critical errors
+        # Note: This is sync, so we can't await. Session will be marked incomplete
+        # when the orchestrator is destroyed or when cleanup is called.
+        
         self.error_handler.log_error(
             error_type=f"{operation}_failure",
             component="orchestrator",
@@ -849,3 +883,43 @@ How it works:
         """
         if uid in self._message_handlers:
             del self._message_handlers[uid]
+    
+    def get_metrics_summary(self) -> dict:
+        """
+        Get performance metrics summary.
+        
+        Returns:
+            Dictionary with all metrics
+        """
+        metrics_collector = get_metrics_collector()
+        return metrics_collector.get_summary()
+    
+    def log_metrics_summary(self):
+        """Log performance metrics summary."""
+        metrics_collector = get_metrics_collector()
+        metrics_collector.log_summary()
+
+    async def cleanup(self, completed: bool = False):
+        """
+        Cleanup orchestrator resources and end session tracking.
+        
+        Args:
+            completed: Whether the session completed successfully
+        """
+        # End session tracking if not already ended
+        if self.user_session and not self._session_metrics_ended:
+            metrics_collector = get_metrics_collector()
+            await metrics_collector.end_session(
+                self.session_id,
+                completed=completed,
+                final_state=self.user_session.current_state.value if self.user_session.current_state else "unknown"
+            )
+            self._session_metrics_ended = True
+        
+        # Stop message polling if active
+        if self._polling_active:
+            await self.stop_message_polling()
+        
+        # Close LLM service connection pool
+        if self.llm_service:
+            await self.llm_service.close()

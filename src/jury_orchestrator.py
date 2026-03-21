@@ -496,6 +496,8 @@ Respond to this statement as part of the deliberation. Keep your response under 
                     system_prompt=juror.system_prompt,
                     user_prompt=user_prompt,
                     fallback_text=fallback,
+                    agent_role=f"juror_{juror.id}",  # For caching
+                    stage="deliberation",  # For caching
                     max_tokens=200 if juror.type == "active_ai" else 100,
                     timeout=15,  # 15 second limit
                     model_override=model_override

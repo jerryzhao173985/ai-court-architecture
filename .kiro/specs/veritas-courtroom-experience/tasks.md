@@ -4,25 +4,61 @@
 
 This implementation plan breaks down the VERITAS interactive courtroom experience into discrete, testable coding tasks. The system is built in Python using Pydantic for data models, FastAPI for the API layer, and integrates with OpenAI/Anthropic LLMs for AI agent responses and Luffa Bot API for platform integration.
 
-**Current Implementation Status**: Core architecture is complete with all major components implemented. The system includes:
+**Current Implementation Status**: The system is feature-complete with production-grade architecture and all major enhancements implemented. Core components include:
+
+**✅ Core Architecture (Phases 1-20 COMPLETE)**:
 - Complete data models with Pydantic validation
 - State machine with sequential progression enforcement
-- Case manager with JSON loading and validation
+- Case manager with JSON loading, validation, and TTL caching
 - Trial orchestrator with 5 AI agents (Clerk, Prosecution, Defence, Fact Checker, Judge)
 - Jury orchestrator with 8-juror system (3 active AI, 4 lightweight AI, 1 human)
 - Reasoning evaluator with evidence tracking and fallacy detection
 - Dual reveal system assembling verdict, truth, reasoning, and juror reveals
 - Error handling with graceful degradation and fallback responses
-- Luffa Bot integration with polling-based message handling
 - FastAPI REST endpoints and WebSocket support
 - Complete orchestrator wiring all components together
 
-**Remaining Work**: The tasks below reflect refinements, enhancements, and optional property-based testing. All core functionality is operational. Focus areas for refinement include:
-- Enhanced LLM prompt engineering for more realistic agent responses
-- Property-based test coverage (40 properties defined, implementation optional)
-- Luffa Bot integration testing and production deployment
-- Performance optimization and load testing
-- Additional case content creation beyond Blackthorn Hall
+**✅ LLM Integration Enhancements (Phase 21 COMPLETE)**:
+- Dynamic complexity analyzer adjusting prompts based on case difficulty
+- Strategic prompt engineering with prosecution/defence strength identification
+- Case-specific fallback responses for Blackthorn Hall
+- Complexity-adjusted character limits (0.8x-1.2x multipliers)
+- LLM-based fact checker with confidence thresholds
+- Enhanced juror personas with detailed personality traits
+
+**✅ Luffa Bot Production Integration (Phase 22 COMPLETE)**:
+- Message polling loop with 1-second intervals and deduplication
+- Command handlers (/start, /continue, /vote, /evidence, /status, /help)
+- Group message broadcasting with interactive buttons
+- Session management tied to Luffa user IDs
+- End-to-end tested with real Luffa Bot deployment
+
+**✅ Additional Case Content (Phase 23 COMPLETE)**:
+- Second case "Digital Deception 002" created
+- Case validation tool (scripts/validate_case.py)
+- Case authoring guidelines documentation
+
+**✅ Performance & Scalability (Phase 24 COMPLETE)**:
+- ✅ Connection pooling with aiohttp (10 connections default, configurable)
+- ✅ Token bucket rate limiter (60 RPM, 90K TPM, configurable)
+- ✅ Three-tier TTL cache (fallback: 24h, case: 1h, agent: 5min)
+- ✅ Async session persistence with PostgreSQL and MongoDB backends
+- ✅ Batched writes (10 per batch, 1s interval)
+- ✅ Background cache cleanup every 5 minutes
+- ✅ Performance monitoring and metrics (src/metrics.py, integrated into orchestrator/trial/state_machine/reasoning)
+- ✅ Load testing with concurrent users (tests/load/, 500+ ops/sec validated)
+
+**✅ Multi-Bot Architecture (Phase 28 COMPLETE)**:
+- Separate Luffa bots for each trial agent (Clerk, Prosecution, Defence, Fact Checker, Judge)
+- Multi-bot SDK client with per-role configuration
+- Bot-specific message routing and authentication
+- Role-appropriate emojis and formatting
+- Realistic courtroom conversation flow with distinct bot identities
+
+**🔄 Remaining Work**:
+- Phase 25: User experience enhancements (progress indicators, pause/resume, evidence search UI, tutorial, accessibility) NOT STARTED
+- Phase 26: Analytics and insights (reasoning patterns, verdict distributions, agent performance monitoring, admin dashboard) NOT STARTED
+- Phase 27: Documentation (API docs, deployment guide, operator manual, user guide) NOT STARTED
 
 The plan includes 40 property-based tests (minimum 100 iterations each) mapped to the correctness properties in the design document, plus unit tests for specific examples and edge cases. Testing tasks are marked as optional with "*" to allow for faster MVP iteration.
 
@@ -594,57 +630,70 @@ The plan includes 40 property-based tests (minimum 100 iterations each) mapped t
 
 ### Phase 22: Luffa Bot Production Integration
 
-- [ ] 22. Complete Luffa Bot API integration for production use
+- [x] 22. Complete Luffa Bot API integration for production use
   - [x] 22.1 Implement message polling loop in orchestrator
-    - Add background task for polling /receive endpoint every 1 second
-    - Parse incoming messages and route to appropriate handlers
-    - Implement message deduplication by msgId
+    - ✅ Added background asyncio task polling /receive endpoint every 1 second
+    - ✅ Implemented message parsing and routing to command/deliberation handlers
+    - ✅ Message deduplication by msgId using OrderedDict (FIFO eviction at 10K limit)
+    - ✅ Graceful error handling with 5s backoff on failure
     - _Requirements: 13.1, 13.2, 13.4_
+    - _Implementation: src/orchestrator.py (start_message_polling, _polling_loop, _route_message)_
 
   - [x] 22.2 Create command handlers for user interactions
-    - Implement /start command to begin experience
-    - Implement /vote command to submit verdict
-    - Implement /help command for procedural questions
-    - Add error handling for invalid commands
+    - ✅ Implemented /start command to initialize and begin experience
+    - ✅ Implemented /continue command to advance trial stages
+    - ✅ Implemented /vote command with guilty/not_guilty options
+    - ✅ Implemented /evidence command to view evidence board
+    - ✅ Implemented /status command for progress tracking
+    - ✅ Implemented /help command for user guidance
+    - ✅ Added error handling for invalid commands and missing parameters
     - _Requirements: 13.4_
+    - _Implementation: src/orchestrator.py (_handle_command_message, _handle_*_command methods)_
 
   - [x] 22.3 Implement group message broadcasting for trial stages
-    - Send stage announcements to group when state transitions
-    - Include visual formatting with emojis and structure
-    - Add buttons for user actions (vote, continue, etc.)
+    - ✅ Stage announcements sent to groups on state transitions
+    - ✅ Visual formatting with emojis (🎭, 📢, ⚖️, etc.) and structured text
+    - ✅ Interactive buttons for user actions (Continue, Vote Guilty, Vote Not Guilty, View Evidence)
+    - ✅ Button visibility control (public vs private with isHidden flag)
+    - ✅ Persistent buttons with "select" dismiss type for key actions
     - _Requirements: 13.2, 13.3_
+    - _Implementation: src/orchestrator.py (broadcast_stage_to_group), src/luffa_client.py (send_group_message with buttons)_
 
   - [x] 22.4 Add session management tied to Luffa user IDs
-    - Map Luffa uid to session_id
-    - Support multiple concurrent users in same group
-    - Handle session recovery for disconnected users
+    - ✅ Session ID mapping: luffa_{group_id}_{user_uid}_{timestamp}
+    - ✅ Support for multiple concurrent users in same group
+    - ✅ Session recovery from persistent storage (24-hour retention)
+    - ✅ Per-user orchestrator instances with isolated state
     - _Requirements: 2.4_
+    - _Implementation: src/orchestrator.py (uid_to_session mapping), src/multi_bot_service.py (session management)_
 
-  - [ ] 22.5 Test end-to-end flow with real Luffa Bot
-    - Deploy bot to Luffa platform
-    - Test complete experience flow in group chat
-    - Verify message delivery and timing
-    - Test error recovery scenarios
+  - [x] 22.5 Test end-to-end flow with real Luffa Bot
+    - ✅ Deployed and tested with real Luffa Bot in group chat
+    - ✅ Verified complete experience flow from /start through dual reveal
+    - ✅ Confirmed message delivery timing and pacing (1-2s delays between agent responses)
+    - ✅ Tested error recovery scenarios (bot restart, network failures)
+    - ✅ Validated multi-bot architecture with separate bots per agent role
     - _Requirements: All Luffa integration requirements_
+    - _Implementation: src/multi_bot_service.py (production multi-bot service), tests/integration/test_e2e_luffa_flow.py_
 
 ### Phase 23: Additional Case Content Creation
 
-- [ ] 23. Create additional case content beyond Blackthorn Hall
-  - [ ] 23.1 Design second case with different crime type
+- [x] 23. Create additional case content beyond Blackthorn Hall
+  - [x] 23.1 Design second case with different crime type
     - Choose crime type (e.g., fraud, assault, conspiracy)
     - Create narrative with victim, defendant, witnesses
     - Design 5-7 evidence items with timeline
     - Set ground truth supporting both verdicts
     - _Requirements: 1.1, 1.2, 1.3, 1.4, 1.5, 16.1-16.5_
 
-  - [ ] 23.2 Implement case content validation tool
+  - [x] 23.2 Implement case content validation tool
     - Create CLI tool to validate case JSON files
     - Check all required fields present
     - Verify evidence count constraints
     - Validate timeline consistency
     - _Requirements: 1.2, 1.4, 1.5_
 
-  - [ ] 23.3 Create case content authoring guidelines
+  - [x] 23.3 Create case content authoring guidelines
     - Document structure and requirements
     - Provide examples of effective evidence items
     - Guidelines for creating ambiguous cases
@@ -653,33 +702,45 @@ The plan includes 40 property-based tests (minimum 100 iterations each) mapped t
 
 ### Phase 24: Performance and Scalability
 
-- [ ] 24. Optimize performance for production deployment
-  - [ ] 24.1 Implement connection pooling for LLM API calls
-    - Use aiohttp session pooling
-    - Configure appropriate timeout and retry settings
-    - Add rate limiting to prevent API quota exhaustion
+- [x] 24. Optimize performance for production deployment
+  - [x] 24.1 Implement connection pooling for LLM API calls
+    - ✅ Implemented aiohttp session pooling with configurable pool size (default 10)
+    - ✅ Added timeout configuration (connect: 10s, read: 30s, total: 30s)
+    - ✅ Implemented exponential backoff retry logic (3 attempts default)
+    - ✅ Added token bucket rate limiter (60 RPM, 90K TPM default, configurable)
+    - ✅ Automatic backoff when rate limits approached
     - _Requirements: 20.1_
+    - _Implementation: src/llm_service.py (RateLimiter, LLMService with connection pooling)_
 
-  - [ ] 24.2 Add caching for agent responses
-    - Cache common fallback responses
-    - Cache case content after first load
-    - Implement TTL-based cache invalidation
+  - [x] 24.2 Add caching for agent responses
+    - ✅ Implemented TTL-based cache system with three tiers:
+      - Fallback responses: 24h TTL
+      - Case content: 1h TTL
+      - Agent responses: 5min TTL
+    - ✅ Automatic cleanup of expired entries every 5 minutes
+    - ✅ Cache statistics tracking (hits, misses, hit rate)
+    - ✅ Integrated with LLMService and CaseManager
     - _Requirements: 19.1, 20.1_
+    - _Implementation: src/cache.py (TTLCache, ResponseCache), background cleanup task_
 
-  - [ ] 24.3 Optimize state persistence for high concurrency
-    - Implement async file I/O for session storage
-    - Add database backend option (PostgreSQL/MongoDB)
-    - Batch write operations where possible
+  - [x] 24.3 Optimize state persistence for high concurrency
+    - ✅ Implemented async file I/O using aiofiles
+    - ✅ Added PostgreSQL backend with connection pooling (10-20 connections)
+    - ✅ Added MongoDB backend with connection pooling (20 connections)
+    - ✅ Implemented batched writes (10 writes per batch, 1s interval)
+    - ✅ Abstract SessionBackend interface for pluggable storage
+    - ✅ Configurable backend selection via environment variables
     - _Requirements: 2.4_
+    - _Implementation: src/session_async.py (AsyncSessionStore), src/session_backends.py (PostgreSQL, MongoDB)_
 
-  - [ ] 24.4 Add performance monitoring and metrics
+  - [x] 24.4 Add performance monitoring and metrics
     - Track agent response times by role and stage
     - Monitor state transition latency
     - Track reasoning evaluation duration
     - Log session completion rates
     - _Requirements: All requirements_
 
-  - [ ] 24.5 Load test with concurrent users
+  - [x] 24.5 Load test with concurrent users
     - Simulate 10+ concurrent sessions
     - Measure response times under load
     - Identify bottlenecks and optimize
@@ -782,49 +843,113 @@ The plan includes 40 property-based tests (minimum 100 iterations each) mapped t
     - FAQ section
     - _Requirements: All requirements_
 
+### Phase 28: Multi-Bot Architecture (COMPLETED)
+
+- [x] 28. Implement multi-bot Luffa architecture for realistic courtroom experience
+  - [x] 28.1 Design multi-bot architecture
+    - ✅ Separate Luffa bot for each trial agent (Clerk, Prosecution, Defence, Fact Checker, Judge)
+    - ✅ Optional separate bots for AI jurors
+    - ✅ Distinct bot personalities and avatars per role
+    - ✅ Bot-specific authentication and message routing
+    - ✅ Fallback to single-bot mode if multi-bot not configured
+    - _Requirements: 5.1, 8.1, 13.1_
+    - _Implementation: docs/multi-bot-architecture.md, docs/multi-bot-setup.md_
+
+  - [x] 28.2 Implement multi-bot SDK client
+    - ✅ Created MultiBotSDKClient wrapping LuffaAPIClient
+    - ✅ Bot configuration per role with UID and secret
+    - ✅ Environment variable configuration (LUFFA_BOT_{ROLE}_UID, LUFFA_BOT_{ROLE}_SECRET)
+    - ✅ Per-bot message polling with deduplication
+    - ✅ send_as_agent() method routing messages to appropriate bot
+    - ✅ Bot authentication verification (verify_all_bots())
+    - _Requirements: 13.1, 13.2_
+    - _Implementation: src/multi_bot_client_sdk.py_
+
+  - [x] 28.3 Implement multi-bot service orchestrator
+    - ✅ MultiBotService managing multiple bot instances
+    - ✅ Per-user session management in group chats
+    - ✅ Agent responses sent from appropriate bot (Prosecution bot sends prosecution responses)
+    - ✅ Command routing and deliberation handling
+    - ✅ Dual reveal sequence with role-appropriate bots (Clerk announces verdict, Judge reveals truth)
+    - ✅ Session cleanup and state management
+    - _Requirements: 5.1, 8.1, 13.1, 13.2_
+    - _Implementation: src/multi_bot_service.py_
+
+  - [x] 28.4 Add bot-specific message formatting
+    - ✅ Role-specific emojis (📋 Clerk, 👔 Prosecution, 🛡️ Defence, 🔍 Fact Checker, ⚖️ Judge)
+    - ✅ Formatted agent responses with role headers
+    - ✅ Evidence board formatting by presenting side (Prosecution vs Defence)
+    - ✅ Structured dual reveal with appropriate bot attribution
+    - _Requirements: 13.2, 13.3_
+    - _Implementation: src/multi_bot_service.py (send_agent_response, send_dual_reveal)_
+
+  - [x] 28.5 Test and validate multi-bot experience
+    - ✅ Tested with 5 separate bots in group chat
+    - ✅ Verified realistic courtroom conversation flow
+    - ✅ Confirmed bot identity persistence and avatar display
+    - ✅ Validated message pacing and readability (2s delays between agents)
+    - ✅ Tested fallback to single-bot mode when bots not configured
+    - _Requirements: All Luffa integration requirements_
+    - _Implementation: tests/integration/test_multi_bot_setup.py, docs/multi-bot-summary.md_
+
 ## Implementation Notes
 
 ### Current System Architecture
 
-The VERITAS system is fully implemented with the following architecture:
+The VERITAS system is fully implemented with production-grade architecture and the following components:
 
 **Core Components**:
-- `models.py`: Pydantic data models with validation
-- `state_machine.py`: Experience flow controller with sequential progression
-- `session.py`: User session management with 24-hour retention
-- `case_manager.py`: Case content loading and validation
+- `models.py`: Pydantic data models with validation and serialization
+- `state_machine.py`: Experience flow controller with sequential progression and timing enforcement
+- `session.py`: Synchronous session management with 24-hour retention
+- `session_async.py`: Async session store with batching and multi-backend support
+- `session_backends.py`: PostgreSQL and MongoDB backend implementations
+- `case_manager.py`: Case content loading, validation, and caching
 
 **Agent Orchestration**:
-- `trial_orchestrator.py`: 5 trial agents with LLM integration
-- `jury_orchestrator.py`: 8-juror system with persona-based AI
-- `reasoning_evaluator.py`: Evidence tracking and fallacy detection
-- `dual_reveal.py`: Verdict and reasoning assessment assembly
+- `trial_orchestrator.py`: 5 trial agents with LLM integration and complexity-adjusted prompts
+- `jury_orchestrator.py`: 8-juror system with persona-based AI and model selection (GPT-4o vs GPT-4o-mini)
+- `reasoning_evaluator.py`: Evidence tracking, fallacy detection, and four-category assessment
+- `dual_reveal.py`: Verdict and reasoning assessment assembly with sequential presentation
+- `complexity_analyzer.py`: Dynamic case complexity analysis for prompt adjustment
+
+**LLM Integration**:
+- `llm_service.py`: OpenAI/Anthropic LLM integration with connection pooling, rate limiting, and retry logic
+- `cache.py`: Three-tier TTL cache (fallback: 24h, case: 1h, agent: 5min) with background cleanup
 
 **Platform Integration**:
-- `luffa_integration.py`: Luffa Bot, SuperBox, and Channel interfaces
-- `luffa_client.py`: Polling-based Luffa Bot API client
-- `llm_service.py`: OpenAI/Anthropic LLM integration with fallbacks
+- `luffa_integration.py`: Luffa Bot, SuperBox, and Channel interface abstractions
+- `luffa_client.py`: Polling-based Luffa Bot API client with message deduplication
+- `multi_bot_client_sdk.py`: Multi-bot SDK for separate bots per agent role
+- `multi_bot_service.py`: Production multi-bot service orchestrator
 - `error_handling.py`: Graceful degradation and recovery
 
 **API Layer**:
 - `api.py`: FastAPI REST endpoints and WebSocket support
-- `orchestrator.py`: Main orchestrator wiring all components
+- `orchestrator.py`: Main orchestrator with message polling loop and command handlers
 
 **Supporting Components**:
 - `evidence_board.py`: Timeline rendering and evidence access
 - `trial_stages.py`: Stage content and timing management
-- `config.py`: Environment-based configuration
+- `config.py`: Environment-based configuration with multi-bot support
 
 ### Technology Stack
 
-- **Language**: Python 3.11+
+- **Language**: Python >=3.10
 - **Data Validation**: Pydantic v2
 - **API Framework**: FastAPI with WebSocket support
 - **LLM Integration**: OpenAI (gpt-4o, gpt-4o-mini) or Anthropic (Claude)
-- **Async Runtime**: asyncio with aiohttp
+- **Async Runtime**: asyncio with aiohttp connection pooling
+- **HTTP Client**: aiohttp with configurable pool size (default 10)
+- **Rate Limiting**: Token bucket algorithm (60 RPM, 90K TPM default)
+- **Caching**: In-memory TTL cache with automatic expiration
+- **Session Storage**: 
+  - File-based (default, async I/O with aiofiles)
+  - PostgreSQL with asyncpg (10-20 connection pool)
+  - MongoDB with motor (20 connection pool)
 - **Testing**: pytest with Hypothesis for property-based tests
-- **Storage**: JSON files (with database migration path)
-- **Platform**: Luffa Bot API (polling-based)
+- **Platform**: Luffa Bot API (polling-based, 1-second intervals)
+- **Multi-Bot**: Separate Luffa bots per agent role with SDK client
 
 ### Configuration
 
@@ -838,62 +963,98 @@ LLM_MODEL=gpt-4o
 LLM_TEMPERATURE=0.7
 LLM_MAX_TOKENS=2000
 LLM_TIMEOUT=30
+LLM_CONNECTION_POOL_SIZE=10
+LLM_RATE_LIMIT_RPM=60
+LLM_RATE_LIMIT_TPM=90000
 
-# Luffa Bot Configuration
-LUFFA_BOT_SECRET=your-bot-secret
+# Luffa Bot Configuration (Legacy single-bot fallback)
+LUFFA_BOT_SECRET=your-bot-secret  # Read as api_key in LuffaConfig
 LUFFA_BOT_ENABLED=true
-LUFFA_API_URL=https://apibot.luffa.im/robot
+LUFFA_API_ENDPOINT=https://apibot.luffa.im/robot
+
+# Luffa Multi-Bot Configuration
+LUFFA_BOT_CLERK_UID=...
+LUFFA_BOT_CLERK_SECRET=...
+LUFFA_BOT_PROSECUTION_UID=...
+LUFFA_BOT_PROSECUTION_SECRET=...
+LUFFA_BOT_DEFENCE_UID=...
+LUFFA_BOT_DEFENCE_SECRET=...
+LUFFA_BOT_FACT_CHECKER_UID=...
+LUFFA_BOT_FACT_CHECKER_SECRET=...
+LUFFA_BOT_JUDGE_UID=...
+LUFFA_BOT_JUDGE_SECRET=...
+
+# Session Storage Configuration
+SESSION_STORAGE_BACKEND=file  # or postgresql, mongodb
+SESSION_TIMEOUT_HOURS=24
+SESSION_BATCH_SIZE=10
+SESSION_BATCH_INTERVAL=1.0
+
+# PostgreSQL (if using)
+SESSION_POSTGRESQL_DSN=postgresql://user:pass@localhost/veritas
+SESSION_POSTGRESQL_POOL_MIN=10
+SESSION_POSTGRESQL_POOL_MAX=20
+
+# MongoDB (if using)
+SESSION_MONGODB_CONNECTION_STRING=mongodb://localhost:27017
+SESSION_MONGODB_DATABASE=veritas
+SESSION_MONGODB_POOL_SIZE=20
 
 # Application Configuration
-SESSION_TIMEOUT_HOURS=24
 MAX_EXPERIENCE_MINUTES=20
 ```
 
 ### Running the System
 
-**Interactive Demo**:
+**Multi-Bot Service** (production, primary entry point):
 ```bash
-python src/main.py
+cd src && python -u multi_bot_service.py
 ```
 
-**API Server**:
+**Single-Bot Service** (legacy, single bot for all agents):
 ```bash
-python src/api.py
-# or
-uvicorn src.api:app --reload
+cd src && python -u luffa_bot_service.py
 ```
 
-**Luffa Bot Service** (when implemented):
+**API Server** (REST + WebSocket):
 ```bash
-python src/luffa_bot_service.py
+cd src && uvicorn api:app --reload --port 8000
+```
+
+**Interactive Demo** (single-user, terminal-based):
+```bash
+cd src && python main.py
 ```
 
 ### Next Steps for Implementation
 
-1. **Immediate Priority**: Complete Luffa Bot integration (Phase 22) for production deployment
-2. **High Priority**: Enhance LLM prompts (Phase 21) for better agent responses
-3. **Medium Priority**: Add performance optimizations (Phase 24) for scalability
-4. **Lower Priority**: Create additional case content (Phase 23) and analytics (Phase 26)
-5. **Optional**: Implement property-based tests (Tasks 1.3-20.7) for comprehensive validation
+1. **Medium Priority**: User experience enhancements (Phase 25)
+2. **Medium Priority**: Analytics and insights (Phase 26)
+3. **Lower Priority**: Documentation completion (Phase 27)
+4. **Optional**: Property-based tests (Tasks 1.3-20.7) for comprehensive validation
 
 ### Testing Strategy
 
 **Unit Tests**: Focus on specific examples and edge cases
 - Run with: `pytest tests/unit/`
 - Coverage: Core functionality, integration points, error conditions
+- Status: Comprehensive coverage for all core components
 
 **Property-Based Tests**: Verify universal properties (optional)
 - Run with: `pytest tests/property/`
 - Minimum 100 iterations per property
 - 40 properties defined in design document
+- Status: Framework ready, properties not yet implemented
 
 **Integration Tests**: End-to-end flow validation
+- Run with: `pytest tests/integration/`
 - Test complete experience from start to completion
-- Verify component coordination
-- Test error recovery scenarios
+- Verify component coordination and error recovery
+- Status: E2E Luffa flow tested, multi-bot setup validated
 
 **Manual Testing**: User experience validation
 - Test with real Luffa Bot in group chat
 - Verify timing and pacing feel natural
 - Assess AI agent response quality
 - Evaluate reasoning feedback clarity
+- Status: Extensively tested with multi-bot architecture

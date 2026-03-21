@@ -1,0 +1,205 @@
+{
+  "caseId": "digital-deception-002",
+  "title": "The Crown v. Sarah Chen",
+  "narrative": {
+    "hookScene": "The glass towers of London's financial district gleam in the morning sun, but inside the offices of Meridian Investment Trust, a scandal is unfolding. £2.3 million has vanished from client accounts over eighteen months, siphoned through a web of phantom transactions. The digital trail leads to Sarah Chen, the firm's senior compliance officer—the very person tasked with preventing such fraud. Now she stands accused of orchestrating an elaborate scheme, but the evidence that seems damning on the surface may tell a more complicated story.",
+    "chargeText": "Sarah Chen, you are charged with fraud by abuse of position contrary to Section 4 of the Fraud Act 2006, in that between June 2022 and December 2023, you dishonestly abused your position as compliance officer at Meridian Investment Trust, intending to make a gain for yourself or cause loss to others. How do you plead?",
+    "victimProfile": {
+      "name": "Meridian Investment Trust",
+      "role": "Victim",
+      "background": "A mid-sized investment firm managing £450 million in client assets. The firm prided itself on rigorous compliance standards and had never experienced a significant fraud incident in its 30-year history. The missing £2.3 million represents funds from 47 different client accounts.",
+      "relevantFacts": [
+        "Discovered the fraud during a routine external audit in January 2024",
+        "The fraudulent transactions occurred over 18 months",
+        "All transactions were authorized using Sarah Chen's digital credentials",
+        "The firm's reputation has been severely damaged, losing 12 major clients"
+      ]
+    },
+    "defendantProfile": {
+      "name": "Sarah Chen",
+      "role": "Defendant",
+      "background": "Senior compliance officer at Meridian Investment Trust for 8 years. Sarah, 36, had an impeccable record and was considered a rising star in financial compliance. She held advanced certifications and had previously identified and prevented two attempted frauds at the firm.",
+      "relevantFacts": [
+        "Had exclusive access to compliance override systems",
+        "Her digital credentials were used to authorize all fraudulent transactions",
+        "Claims her credentials were compromised by an unknown party",
+        "Has no unusual spending patterns or hidden assets that investigators could find"
+      ]
+    },
+    "witnessProfiles": [
+      {
+        "name": "Marcus Webb",
+        "role": "Chief Technology Officer",
+        "background": "Head of IT security at Meridian Investment Trust for 5 years, responsible for digital security infrastructure",
+        "relevantFacts": [
+          "Confirmed all fraudulent transactions used Sarah's credentials",
+          "Found evidence of unusual login patterns from Sarah's account",
+          "Discovered that Sarah's workstation had disabled security logging for 3 months",
+          "Noted that the firm's security protocols had known vulnerabilities"
+        ]
+      },
+      {
+        "name": "Detective Sergeant Rachel Foster",
+        "role": "Financial Crimes Investigator",
+        "background": "Metropolitan Police financial crimes unit, 12 years investigating fraud cases",
+        "relevantFacts": [
+          "Traced the stolen funds to a cryptocurrency exchange account",
+          "The exchange account was opened using Sarah's personal information",
+          "Found no evidence of the funds being converted to Sarah's personal use",
+          "Discovered the cryptocurrency account was accessed from IP addresses in Eastern Europe"
+        ]
+      },
+      {
+        "name": "Dr. James Okonkwo",
+        "role": "Cybersecurity Expert",
+        "background": "Independent forensic analyst with 15 years experience in digital fraud investigation",
+        "relevantFacts": [
+          "Analyzed the transaction patterns and found they were automated, not manual",
+          "Identified sophisticated malware on Sarah's workstation that could steal credentials",
+          "Determined the malware was installed 2 weeks before the first fraudulent transaction",
+          "Noted that similar malware has been used in organized cybercrime operations"
+        ]
+      },
+      {
+        "name": "Jennifer Hartley",
+        "role": "Former Junior Analyst",
+        "background": "Worked under Sarah Chen for 2 years before leaving the firm in August 2023",
+        "relevantFacts": [
+          "Testified that Sarah was obsessed with finding security vulnerabilities",
+          "Claimed Sarah once said the firm's systems were 'embarrassingly easy to exploit'",
+          "Admitted she left the firm after a dispute with Sarah over a performance review",
+          "Acknowledged Sarah had reported her concerns about security to management multiple times"
+        ]
+      }
+    ]
+  },
+  "evidence": [
+    {
+      "id": "evidence-001",
+      "type": "documentary",
+      "title": "Transaction Audit Trail",
+      "description": "Digital records showing 127 unauthorized transactions totaling £2.3 million between June 2022 and December 2023. Each transaction was authorized using Sarah Chen's compliance officer credentials. The transactions moved funds from client accounts to a series of intermediate accounts before final transfer to a cryptocurrency exchange. All transactions occurred during business hours on weekdays.",
+      "timestamp": "2022-06-15T09:23:00Z",
+      "presentedBy": "prosecution",
+      "significance": "Establishes that Sarah's credentials were used to authorize all fraudulent transactions, demonstrating access and technical capability"
+    },
+    {
+      "id": "evidence-002",
+      "type": "documentary",
+      "title": "Cryptocurrency Account Registration",
+      "description": "Account opening documents for a cryptocurrency exchange account created in May 2022, one month before the fraud began. The account was registered using Sarah Chen's name, date of birth, and national insurance number. The account received £2.3 million in transfers matching the stolen funds. However, the email address used (sarahchen2847@protonmail.com) was not Sarah's known email.",
+      "timestamp": "2022-05-20T14:15:00Z",
+      "presentedBy": "prosecution",
+      "significance": "Links Sarah's personal information to the destination account for stolen funds, suggesting premeditation"
+    },
+    {
+      "id": "evidence-003",
+      "type": "testimonial",
+      "title": "IT Security Analysis",
+      "description": "Marcus Webb testifies that security logging on Sarah's workstation was disabled for three months during the fraud period. He states this required administrator access, which Sarah possessed. However, under cross-examination, he admits that five other employees also had administrator access, and the firm's security protocols did not adequately monitor who disabled logging features.",
+      "timestamp": "2023-09-10T10:30:00Z",
+      "presentedBy": "prosecution",
+      "significance": "Suggests Sarah deliberately concealed her activities, though raises questions about security oversight"
+    },
+    {
+      "id": "evidence-004",
+      "type": "testimonial",
+      "title": "Forensic Malware Analysis",
+      "description": "Dr. Okonkwo testifies that he discovered sophisticated credential-stealing malware on Sarah's workstation. The malware, known as 'SilentVault,' is typically used by organized cybercrime groups. It was installed two weeks before the first fraudulent transaction and was capable of capturing login credentials and automating transactions. The malware was designed to evade detection by standard antivirus software.",
+      "timestamp": "2023-10-05T11:00:00Z",
+      "presentedBy": "defence",
+      "significance": "Provides alternative explanation—Sarah's credentials were stolen by sophisticated malware, not used by her directly"
+    },
+    {
+      "id": "evidence-005",
+      "type": "documentary",
+      "title": "Financial Records Analysis",
+      "description": "Comprehensive review of Sarah Chen's personal financial records, bank statements, property records, and lifestyle expenditures. The analysis found no evidence of unusual spending, hidden assets, or lifestyle changes consistent with receiving £2.3 million. Sarah's modest flat, 8-year-old car, and spending patterns remained consistent throughout the fraud period. Her savings account contained £23,000.",
+      "timestamp": "2023-11-12T15:45:00Z",
+      "presentedBy": "defence",
+      "significance": "Raises doubt about motive—if Sarah stole £2.3 million, where did the money go?"
+    },
+    {
+      "id": "evidence-006",
+      "type": "testimonial",
+      "title": "Cryptocurrency Account Access Logs",
+      "description": "DS Foster testifies that the cryptocurrency account was accessed 47 times between June 2022 and January 2024. Forensic analysis of IP addresses shows all access originated from servers in Romania, Bulgaria, and Ukraine—never from the UK. The funds were systematically converted to privacy coins and moved through mixing services, consistent with professional money laundering operations.",
+      "timestamp": "2023-12-01T09:15:00Z",
+      "presentedBy": "defence",
+      "significance": "Suggests the fraud was conducted by international cybercriminals, not by Sarah from her London office"
+    },
+    {
+      "id": "evidence-007",
+      "type": "documentary",
+      "title": "Security Vulnerability Reports",
+      "description": "Internal emails from Sarah Chen to senior management dated March 2022, May 2022, and July 2022, warning about critical security vulnerabilities in the firm's transaction authorization system. Sarah specifically identified that credential theft could allow unauthorized transactions and recommended implementing multi-factor authentication. Management responses indicate the recommendations were 'under review' but no action was taken until after the fraud was discovered.",
+      "timestamp": "2022-03-15T16:20:00Z",
+      "presentedBy": "defence",
+      "significance": "Demonstrates Sarah identified the exact vulnerabilities exploited in the fraud and tried to prevent it—inconsistent with planning to exploit those vulnerabilities herself"
+    }
+  ],
+  "timeline": [
+    {
+      "timestamp": "2022-03-15T16:20:00Z",
+      "description": "Sarah sends first security vulnerability warning to management",
+      "evidenceIds": ["evidence-007"]
+    },
+    {
+      "timestamp": "2022-05-20T14:15:00Z",
+      "description": "Cryptocurrency account opened using Sarah's personal information",
+      "evidenceIds": ["evidence-002"]
+    },
+    {
+      "timestamp": "2022-06-01T08:00:00Z",
+      "description": "Malware installed on Sarah's workstation (estimated date)",
+      "evidenceIds": ["evidence-004"]
+    },
+    {
+      "timestamp": "2022-06-15T09:23:00Z",
+      "description": "First fraudulent transaction occurs using Sarah's credentials",
+      "evidenceIds": ["evidence-001"]
+    },
+    {
+      "timestamp": "2023-09-10T10:30:00Z",
+      "description": "Security logging found disabled on Sarah's workstation",
+      "evidenceIds": ["evidence-003"]
+    },
+    {
+      "timestamp": "2023-12-20T14:00:00Z",
+      "description": "Final fraudulent transaction before discovery",
+      "evidenceIds": ["evidence-001"]
+    },
+    {
+      "timestamp": "2024-01-08T11:00:00Z",
+      "description": "External audit discovers the fraud",
+      "evidenceIds": ["evidence-001"]
+    }
+  ],
+  "groundTruth": {
+    "actualVerdict": "not_guilty",
+    "keyFacts": [
+      "The malware evidence provides a credible alternative explanation for how Sarah's credentials were used without her knowledge",
+      "The complete absence of the stolen funds in Sarah's possession or spending patterns creates reasonable doubt about motive and benefit",
+      "The cryptocurrency account access from Eastern European IP addresses, never from the UK, suggests professional cybercriminals rather than an inside job",
+      "Sarah's documented warnings about the exact security vulnerabilities that were exploited is inconsistent with planning to exploit them herself",
+      "While Sarah's credentials were used and her personal information opened the cryptocurrency account, the prosecution cannot prove beyond reasonable doubt that Sarah herself conducted the fraud rather than being a victim of sophisticated credential theft",
+      "The automated nature of the transactions and the professional money laundering operation suggest organized cybercrime rather than an individual employee"
+    ],
+    "reasoningCriteria": {
+      "requiredEvidenceReferences": [
+        "evidence-004",
+        "evidence-005",
+        "evidence-006",
+        "evidence-007"
+      ],
+      "logicalFallacies": [
+        "ad_hominem",
+        "appeal_to_emotion",
+        "hasty_generalization",
+        "false_dichotomy",
+        "post_hoc"
+      ],
+      "coherenceThreshold": 0.65
+    }
+  }
+}

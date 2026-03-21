@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 from enum import Enum
 from typing import Optional, Callable, Awaitable, TYPE_CHECKING
 from pydantic import BaseModel, Field, ConfigDict
+from metrics import get_metrics_collector
 
 logger = logging.getLogger("veritas")
 
@@ -135,34 +136,62 @@ class StateMachine:
         Raises:
             ValueError: If the transition is not valid
         """
+        # Start metrics tracking
+        metrics_collector = get_metrics_collector()
+        transition_metrics = metrics_collector.start_state_transition(
+            self.current_state.value,
+            target_state.value
+        )
+        
         if not self.can_transition_to(target_state):
-            raise ValueError(
+            error_msg = (
                 f"Invalid transition from {self.current_state} to {target_state}. "
                 f"Expected next state: {STATE_TRANSITIONS.get(self.current_state)}"
             )
-        
-        # Check maximum duration
-        elapsed = self.get_elapsed_time_seconds()
-        if elapsed > self.max_duration_minutes * 60:
-            # Force completion if max duration exceeded
-            logger.warning(
-                f"Max duration ({self.max_duration_minutes}min) exceeded. "
-                f"Forcing transition to COMPLETED from {self.current_state}"
+            await metrics_collector.end_state_transition(
+                transition_metrics,
+                success=False,
+                error=error_msg
             )
-            target_state = ExperienceState.COMPLETED
-        
-        # Exit current state
-        if self.state_history:
-            self.state_history[-1].exited_at = datetime.now()
-            self.state_history[-1].duration_seconds = self.state_history[-1].calculate_duration()
-        
-        # Enter new state
-        self.current_state = target_state
-        timing = StateTiming(
-            state=target_state,
-            entered_at=datetime.now()
-        )
-        self.state_history.append(timing)
+            raise ValueError(error_msg)
+
+        try:
+            # Check maximum duration
+            elapsed = self.get_elapsed_time_seconds()
+            if elapsed > self.max_duration_minutes * 60:
+                # Force completion if max duration exceeded
+                logger.warning(
+                    f"Max duration ({self.max_duration_minutes}min) exceeded. "
+                    f"Forcing transition to COMPLETED from {self.current_state}"
+                )
+                target_state = ExperienceState.COMPLETED
+
+            # Exit current state
+            if self.state_history:
+                self.state_history[-1].exited_at = datetime.now()
+                self.state_history[-1].duration_seconds = self.state_history[-1].calculate_duration()
+
+            # Enter new state
+            self.current_state = target_state
+            timing = StateTiming(
+                state=target_state,
+                entered_at=datetime.now()
+            )
+            self.state_history.append(timing)
+
+            # Increment session state transitions
+            await metrics_collector.increment_session_state_transitions(self.session_id)
+
+            # End metrics tracking
+            await metrics_collector.end_state_transition(transition_metrics, success=True)
+
+        except Exception as e:
+            await metrics_collector.end_state_transition(
+                transition_metrics,
+                success=False,
+                error=str(e)
+            )
+            raise
 
     def get_next_state(self) -> Optional[ExperienceState]:
         """Get the next valid state from current state."""

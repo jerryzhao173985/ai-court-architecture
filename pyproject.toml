@@ -10,16 +10,24 @@ dependencies = [
     "openai>=1.0.0",
     "anthropic>=0.18.0",
     "aiohttp>=3.9.0",
+    "aiofiles>=23.2.0",
     "websockets>=11.0.0",
     "python-dotenv>=1.0.0",
     "luffa-bot-python-sdk>=0.1.2",
 ]
+
+[project.scripts]
+validate-case = "scripts.validate_case:main"
 
 [project.optional-dependencies]
 test = [
     "pytest>=7.0.0",
     "pytest-asyncio>=0.23.0",
     "hypothesis>=6.0.0",
+]
+database = [
+    "asyncpg>=0.29.0",
+    "motor>=3.3.0",
 ]
 
 [build-system]

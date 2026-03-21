@@ -381,72 +381,99 @@ class LuffaBotService:
         vote_result = await orchestrator.submit_vote(vote)
         
         if vote_result["success"]:
-            await self.send_dual_reveal(group_id, vote_result["dual_reveal"], sender_uid)
+            if "dual_reveal" in vote_result:
+                await self.send_dual_reveal(group_id, vote_result["dual_reveal"], sender_uid)
+            else:
+                # Fallback when reasoning evaluation fails
+                verdict_data = vote_result.get("verdict", {})
+                v = verdict_data.get("verdict", "unknown").replace("_", " ").upper()
+                await self.client.send_group_message(
+                    group_id,
+                    f"⚖️ THE VERDICT\n\nThe jury finds the defendant: {v}\n\n"
+                    f"(Detailed reasoning assessment is temporarily unavailable.)\n\n"
+                    f"Type /start to begin a new trial."
+                )
+                await self._cleanup_user_session(sender_uid, group_id)
+        else:
+            await self.client.send_group_message(
+                group_id,
+                f"❌ Vote processing failed: {vote_result.get('error', 'Unknown error')}\n\n"
+                f"Type /vote guilty or /vote not_guilty to try again."
+            )
 
     async def send_dual_reveal(self, group_id: str, dual_reveal: dict, sender_uid: str):
         """
         Send dual reveal in sequence.
-        
+
         Args:
             group_id: Group ID
             dual_reveal: Dual reveal data
             sender_uid: User who completed the trial
         """
-        # 1. Verdict
-        verdict = dual_reveal["verdict"]
-        verdict_text = verdict["verdict"].replace("_", " ").upper()
-        
-        await self.client.send_group_message(
-            group_id,
-            f"⚖️ THE VERDICT\n\nThe jury finds the defendant: {verdict_text}\n\nVote: {verdict['guiltyCount']} guilty, {verdict['notGuiltyCount']} not guilty"
-        )
-        await asyncio.sleep(3)
-        
-        # 2. Ground truth
-        truth = dual_reveal["groundTruth"]
-        actual = truth["actualVerdict"].replace("_", " ").upper()
-        
-        await self.client.send_group_message(
-            group_id,
-            f"🔍 THE TRUTH\n\nActual verdict: {actual}\n\n{truth['explanation']}"
-        )
-        await asyncio.sleep(3)
-        
-        # 3. Reasoning assessment
-        assessment = dual_reveal["reasoningAssessment"]
-        category = assessment["category"].replace("_", " ").title()
-        
-        feedback_text = f"""📊 REASONING ASSESSMENT
+        try:
+            # 1. Verdict
+            verdict = dual_reveal["verdict"]
+            verdict_text = verdict["verdict"].replace("_", " ").upper()
+
+            await self.client.send_group_message(
+                group_id,
+                f"⚖️ THE VERDICT\n\nThe jury finds the defendant: {verdict_text}\n\nVote: {verdict['guiltyCount']} guilty, {verdict['notGuiltyCount']} not guilty"
+            )
+            await asyncio.sleep(3)
+
+            # 2. Ground truth
+            truth = dual_reveal["groundTruth"]
+            actual = truth["actualVerdict"].replace("_", " ").upper()
+
+            await self.client.send_group_message(
+                group_id,
+                f"🔍 THE TRUTH\n\nActual verdict: {actual}\n\n{truth['explanation']}"
+            )
+            await asyncio.sleep(3)
+
+            # 3. Reasoning assessment
+            assessment = dual_reveal["reasoningAssessment"]
+            category = assessment["category"].replace("_", " ").title()
+
+            feedback_text = f"""📊 REASONING ASSESSMENT
 
 Category: {category}
 Evidence Score: {assessment['evidenceScore']:.2f}/1.0
 Coherence Score: {assessment['coherenceScore']:.2f}/1.0
 
 {assessment['feedback']}"""
-        
-        await self.client.send_group_message(group_id, feedback_text)
-        await asyncio.sleep(3)
-        
-        # 4. Juror reveal
-        juror_text = "🎭 AI JUROR IDENTITIES\n\n"
-        
-        for juror in dual_reveal["jurorReveal"]:
-            if juror["type"] != "human":
-                persona = (juror.get("persona") or "").replace("_", " ").title()
-                vote_text = juror["vote"].replace("_", " ").title()
-                
-                juror_text += f"• {juror['jurorId']}: {persona or 'Juror'} - Voted {vote_text}\n"
-        
-        await self.client.send_group_message(group_id, juror_text)
-        
-        # Complete
-        await self.client.send_group_message(
-            group_id,
-            "✅ Trial complete! Thank you for participating.\n\nType /start to begin a new trial."
-        )
-        
-        # Clean up user session (Task 22.4)
-        self._cleanup_user_session(sender_uid, group_id)
+
+            await self.client.send_group_message(group_id, feedback_text)
+            await asyncio.sleep(3)
+
+            # 4. Juror reveal
+            juror_text = "🎭 AI JUROR IDENTITIES\n\n"
+
+            for juror in dual_reveal["jurorReveal"]:
+                if juror["type"] != "human":
+                    persona = (juror.get("persona") or "").replace("_", " ").title()
+                    vote_text = juror["vote"].replace("_", " ").title()
+
+                    juror_text += f"• {juror['jurorId']}: {persona or 'Juror'} - Voted {vote_text}\n"
+
+            await self.client.send_group_message(group_id, juror_text)
+
+            # Complete
+            await self.client.send_group_message(
+                group_id,
+                "✅ Trial complete! Thank you for participating.\n\nType /start to begin a new trial."
+            )
+        except Exception as e:
+            logger.error(f"Error during dual reveal for {sender_uid}: {e}")
+            try:
+                await self.client.send_group_message(
+                    group_id,
+                    "⚠️ An error occurred during the reveal. The trial is now complete.\n\nType /start to begin a new trial."
+                )
+            except Exception:
+                pass
+        finally:
+            await self._cleanup_user_session(sender_uid, group_id)
 
     async def show_evidence(self, group_id: str, sender_uid: str):
         """
@@ -533,9 +560,23 @@ The story adapts based on your participation!"""
         else:  # DM
             await self.client.send_dm(uid, help_text)
 
+    async def shutdown(self):
+        """Gracefully shut down the service, cleaning up all active sessions."""
+        logger.info("Shutting down VERITAS Luffa Bot service...")
+        self.running = False
+
+        for session_id, orchestrator in list(self.active_sessions.items()):
+            try:
+                await orchestrator.cleanup(completed=False)
+            except Exception as e:
+                logger.error(f"Failed to cleanup session {session_id} during shutdown: {e}")
+
+        self.active_sessions.clear()
+        self.uid_to_session.clear()
+        self.group_users.clear()
+
     def stop(self):
-        """Stop the bot service."""
-        logger.info("Stopping VERITAS Luffa Bot service...")
+        """Stop the service (sets running flag — use shutdown() for graceful cleanup)."""
         self.running = False
 
     # ========================================================================
@@ -641,7 +682,7 @@ The story adapts based on your participation!"""
         # No session found
         return None
 
-    def _cleanup_user_session(self, uid: str, group_id: str) -> None:
+    async def _cleanup_user_session(self, uid: str, group_id: str) -> None:
         """
         Clean up user session after completion.
         
@@ -652,8 +693,20 @@ The story adapts based on your participation!"""
         session_id = self.uid_to_session.get(uid)
         
         if session_id:
-            # Remove from active sessions
+            # Cleanup orchestrator if exists
             if session_id in self.active_sessions:
+                orchestrator = self.active_sessions[session_id]
+                try:
+                    # Determine if session was completed — bot services end at DUAL_REVEAL
+                    completed = (orchestrator.user_session and
+                               orchestrator.user_session.current_state in (
+                                   ExperienceState.DUAL_REVEAL,
+                                   ExperienceState.COMPLETED
+                               ))
+                    await orchestrator.cleanup(completed=completed)
+                except Exception as e:
+                    logger.error(f"Failed to cleanup orchestrator for session {session_id}: {e}")
+                
                 del self.active_sessions[session_id]
             
             # Remove uid mapping
@@ -691,10 +744,11 @@ async def main():
         await service.start()
     except KeyboardInterrupt:
         logger.info("Received shutdown signal")
-        service.stop()
     except Exception as e:
         logger.error(f"Service error: {e}")
         raise
+    finally:
+        await service.shutdown()
 
 
 if __name__ == "__main__":

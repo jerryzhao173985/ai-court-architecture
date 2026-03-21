@@ -4,6 +4,7 @@ import re
 from typing import Literal
 from models import CaseContent, EvidenceItem
 from session import ReasoningAssessment, DeliberationTurn
+from metrics import get_metrics_collector
 
 
 class ReasoningEvaluator:
@@ -63,45 +64,72 @@ class ReasoningEvaluator:
         Returns:
             Complete reasoning assessment
         """
-        # Extract user statements only
-        user_statements = [s for s in statements if s.juror_id == "juror_human"]
+        # Start metrics tracking
+        metrics_collector = get_metrics_collector()
+        # Extract session_id from first statement if available
+        session_id = "unknown"
+        if statements:
+            # Try to extract from juror_id if it contains session info
+            session_id = statements[0].juror_id if hasattr(statements[0], 'juror_id') else "unknown"
         
-        # Track evidence references
-        evidence_refs = self.track_evidence_references(user_statements)
-        evidence_score = self._calculate_evidence_score(evidence_refs)
+        reasoning_metrics = metrics_collector.start_reasoning_evaluation(session_id)
         
-        # Detect fallacies
-        fallacies = self.detect_fallacies(user_statements)
+        try:
+            # Extract user statements only
+            user_statements = [s for s in statements if s.juror_id == "juror_human"]
+            
+            # Track evidence references
+            evidence_refs = self.track_evidence_references(user_statements)
+            evidence_score = self._calculate_evidence_score(evidence_refs)
+            
+            # Detect fallacies
+            fallacies = self.detect_fallacies(user_statements)
+            
+            # Calculate coherence
+            coherence_score = self.calculate_coherence(user_statements)
+            
+            # Determine if verdict is correct
+            is_correct = user_verdict == self.ground_truth.actual_verdict
+            
+            # Determine reasoning quality (sound vs weak)
+            is_sound = self._is_reasoning_sound(evidence_score, coherence_score, fallacies)
+            
+            # Categorize into four outcomes
+            if is_sound and is_correct:
+                category = "sound_correct"
+            elif is_sound and not is_correct:
+                category = "sound_incorrect"
+            elif not is_sound and is_correct:
+                category = "weak_correct"
+            else:
+                category = "weak_incorrect"
+            
+            # Generate feedback
+            feedback = self.generate_feedback(category, evidence_refs, fallacies, coherence_score)
+            
+            # End metrics tracking
+            await metrics_collector.end_reasoning_evaluation(
+                reasoning_metrics,
+                success=True,
+                category=category
+            )
+            
+            return ReasoningAssessment(
+                category=category,
+                evidence_score=evidence_score,
+                coherence_score=coherence_score,
+                fallacies_detected=fallacies,
+                feedback=feedback
+            )
         
-        # Calculate coherence
-        coherence_score = self.calculate_coherence(user_statements)
-        
-        # Determine if verdict is correct
-        is_correct = user_verdict == self.ground_truth.actual_verdict
-        
-        # Determine reasoning quality (sound vs weak)
-        is_sound = self._is_reasoning_sound(evidence_score, coherence_score, fallacies)
-        
-        # Categorize into four outcomes
-        if is_sound and is_correct:
-            category = "sound_correct"
-        elif is_sound and not is_correct:
-            category = "sound_incorrect"
-        elif not is_sound and is_correct:
-            category = "weak_correct"
-        else:
-            category = "weak_incorrect"
-        
-        # Generate feedback
-        feedback = self.generate_feedback(category, evidence_refs, fallacies, coherence_score)
-        
-        return ReasoningAssessment(
-            category=category,
-            evidence_score=evidence_score,
-            coherence_score=coherence_score,
-            fallacies_detected=fallacies,
-            feedback=feedback
-        )
+        except Exception as e:
+            # End metrics tracking with error
+            await metrics_collector.end_reasoning_evaluation(
+                reasoning_metrics,
+                success=False,
+                error=str(e)
+            )
+            raise
 
     def track_evidence_references(self, statements: list[DeliberationTurn]) -> list[str]:
         """

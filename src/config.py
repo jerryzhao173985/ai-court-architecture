@@ -19,6 +19,19 @@ class LLMConfig(BaseModel):
     temperature: float = 0.7
     max_tokens: int = 2000
     timeout: int = 30  # seconds
+    
+    # Connection pooling settings
+    connection_pool_size: int = Field(default=10, alias="connectionPoolSize")
+    connect_timeout: int = Field(default=10, alias="connectTimeout")  # seconds
+    read_timeout: int = Field(default=30, alias="readTimeout")  # seconds
+    
+    # Retry settings
+    max_retries: int = Field(default=3, alias="maxRetries")
+    retry_delay: float = Field(default=1.0, alias="retryDelay")  # seconds, exponential backoff base
+    
+    # Rate limiting settings
+    rate_limit_rpm: int = Field(default=60, alias="rateLimitRpm")  # requests per minute
+    rate_limit_tpm: int = Field(default=90000, alias="rateLimitTpm")  # tokens per minute
 
 
 class LuffaBotConfig(BaseModel):
@@ -54,12 +67,39 @@ class LuffaConfig(BaseModel):
     channel_enabled: bool = Field(default=False, alias="channelEnabled")
 
 
+class SessionStorageConfig(BaseModel):
+    """Configuration for session storage backend."""
+    model_config = ConfigDict(populate_by_name=True)
+    
+    backend: Literal["file", "postgresql", "mongodb"] = "file"
+    
+    # File backend settings
+    file_storage_dir: str = Field(default="data/sessions", alias="fileStorageDir")
+    
+    # PostgreSQL settings
+    postgresql_dsn: Optional[str] = Field(default=None, alias="postgresqlDsn")
+    postgresql_table: str = Field(default="user_sessions", alias="postgresqlTable")
+    postgresql_pool_min: int = Field(default=10, alias="postgresqlPoolMin")
+    postgresql_pool_max: int = Field(default=20, alias="postgresqlPoolMax")
+    
+    # MongoDB settings
+    mongodb_connection_string: Optional[str] = Field(default=None, alias="mongodbConnectionString")
+    mongodb_database: str = Field(default="veritas", alias="mongodbDatabase")
+    mongodb_collection: str = Field(default="user_sessions", alias="mongodbCollection")
+    mongodb_pool_size: int = Field(default=20, alias="mongodbPoolSize")
+    
+    # Batching settings
+    batch_size: int = Field(default=10, alias="batchSize")
+    batch_interval: float = Field(default=1.0, alias="batchInterval")  # seconds
+
+
 class AppConfig(BaseModel):
     """Main application configuration."""
     model_config = ConfigDict(populate_by_name=True)
     
     llm: LLMConfig
     luffa: LuffaConfig
+    session_storage: SessionStorageConfig = Field(default_factory=SessionStorageConfig, alias="sessionStorage")
     session_timeout_hours: int = Field(default=24, alias="sessionTimeoutHours")
     max_experience_minutes: int = Field(default=20, alias="maxExperienceMinutes")
 
@@ -151,7 +191,14 @@ def load_config() -> AppConfig:
             model=llm_model,
             temperature=float(os.getenv("LLM_TEMPERATURE", "0.7")),
             max_tokens=int(os.getenv("LLM_MAX_TOKENS", "2000")),
-            timeout=int(os.getenv("LLM_TIMEOUT", "30"))
+            timeout=int(os.getenv("LLM_TIMEOUT", "30")),
+            connectionPoolSize=int(os.getenv("LLM_CONNECTION_POOL_SIZE", "10")),
+            connectTimeout=int(os.getenv("LLM_CONNECT_TIMEOUT", "10")),
+            readTimeout=int(os.getenv("LLM_READ_TIMEOUT", "30")),
+            maxRetries=int(os.getenv("LLM_MAX_RETRIES", "3")),
+            retryDelay=float(os.getenv("LLM_RETRY_DELAY", "1.0")),
+            rateLimitRpm=int(os.getenv("LLM_RATE_LIMIT_RPM", "60")),
+            rateLimitTpm=int(os.getenv("LLM_RATE_LIMIT_TPM", "90000"))
         ),
         luffa=LuffaConfig(
             apiBaseUrl=luffa_api_url,
@@ -165,6 +212,20 @@ def load_config() -> AppConfig:
             botEnabled=os.getenv("LUFFA_BOT_ENABLED", "false").lower() == "true",
             superboxEnabled=os.getenv("LUFFA_SUPERBOX_ENABLED", "false").lower() == "true",
             channelEnabled=os.getenv("LUFFA_CHANNEL_ENABLED", "false").lower() == "true"
+        ),
+        sessionStorage=SessionStorageConfig(
+            backend=os.getenv("SESSION_STORAGE_BACKEND", "file"),
+            fileStorageDir=os.getenv("SESSION_FILE_STORAGE_DIR", "data/sessions"),
+            postgresqlDsn=os.getenv("SESSION_POSTGRESQL_DSN"),
+            postgresqlTable=os.getenv("SESSION_POSTGRESQL_TABLE", "user_sessions"),
+            postgresqlPoolMin=int(os.getenv("SESSION_POSTGRESQL_POOL_MIN", "10")),
+            postgresqlPoolMax=int(os.getenv("SESSION_POSTGRESQL_POOL_MAX", "20")),
+            mongodbConnectionString=os.getenv("SESSION_MONGODB_CONNECTION_STRING"),
+            mongodbDatabase=os.getenv("SESSION_MONGODB_DATABASE", "veritas"),
+            mongodbCollection=os.getenv("SESSION_MONGODB_COLLECTION", "user_sessions"),
+            mongodbPoolSize=int(os.getenv("SESSION_MONGODB_POOL_SIZE", "20")),
+            batchSize=int(os.getenv("SESSION_BATCH_SIZE", "10")),
+            batchInterval=float(os.getenv("SESSION_BATCH_INTERVAL", "1.0"))
         ),
         sessionTimeoutHours=int(os.getenv("SESSION_TIMEOUT_HOURS", "24")),
         maxExperienceMinutes=int(os.getenv("MAX_EXPERIENCE_MINUTES", "20"))

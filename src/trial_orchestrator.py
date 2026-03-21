@@ -9,6 +9,7 @@ from models import CaseContent, EvidenceItem
 from state_machine import ExperienceState
 from llm_service import LLMService
 from complexity_analyzer import CaseComplexityAnalyzer, ComplexityLevel
+from metrics import get_metrics_collector
 
 logger = logging.getLogger("veritas")
 
@@ -422,8 +423,17 @@ Be authoritative, fair, and clear in your instructions.
         Returns:
             Agent response
         """
+        # Start metrics tracking
+        metrics_collector = get_metrics_collector()
+        agent_metrics = metrics_collector.start_agent_response(agent_role, stage.value)
+        
         agent = self.agents.get(agent_role)
         if not agent:
+            await metrics_collector.end_agent_response(
+                agent_metrics,
+                success=False,
+                error="Agent not found"
+            )
             return self.handle_agent_failure(agent_role, stage)
         
         # Generate user prompt based on stage
@@ -437,8 +447,17 @@ Be authoritative, fair, and clear in your instructions.
                     system_prompt=agent.system_prompt,
                     user_prompt=user_prompt,
                     fallback_text=fallback,
+                    agent_role=agent_role,  # For caching
+                    stage=stage.value,  # For caching
                     max_tokens=agent.character_limit,
                     timeout=agent.response_timeout // 1000  # Convert ms to seconds
+                )
+                
+                # End metrics tracking
+                await metrics_collector.end_agent_response(
+                    agent_metrics,
+                    success=True,
+                    used_fallback=used_fallback
                 )
                 
                 return AgentResponse(
@@ -449,9 +468,19 @@ Be authoritative, fair, and clear in your instructions.
                 )
             except Exception as e:
                 logger.error(f"Agent response generation failed: {e}")
+                await metrics_collector.end_agent_response(
+                    agent_metrics,
+                    success=False,
+                    error=str(e)
+                )
                 return self.handle_agent_failure(agent_role, stage)
         else:
             # No LLM service, use fallback
+            await metrics_collector.end_agent_response(
+                agent_metrics,
+                success=True,
+                used_fallback=True
+            )
             return AgentResponse(
                 agent_role=agent_role,
                 content=fallback,
