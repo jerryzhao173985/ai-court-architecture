@@ -1,5 +1,6 @@
 """Trial layer agent orchestration for VERITAS courtroom experience."""
 
+import asyncio
 from datetime import datetime
 from typing import Optional, Literal
 import logging
@@ -78,6 +79,12 @@ class TrialOrchestrator:
         # Analyze case complexity
         self.complexity_level = self.complexity_analyzer.analyze_complexity(case_content)
         logger.info(f"Case complexity: {self.complexity_level.level}")
+        
+        # Select emphasis items for prosecution/defence variation (Task 26.3)
+        import random
+        num_emphasis = min(3, len(case_content.evidence))
+        self.emphasis_items = random.sample(case_content.evidence, k=num_emphasis)
+        logger.info(f"Selected {num_emphasis} emphasis items for trial variation")
         
         # Create agent configurations with system prompts adjusted for complexity
         self.agents = {
@@ -174,6 +181,14 @@ Be concise, formal, and authoritative."""
         if self.complexity_level:
             complexity_guidance = self.complexity_analyzer.get_complexity_guidance(self.complexity_level)
         
+        # Add emphasis items section (Task 26.3)
+        emphasis_section = ""
+        if hasattr(self, 'emphasis_items') and self.emphasis_items:
+            emphasis_section = "\n\nEMPHASIZE THESE ITEMS MOST STRONGLY:\n"
+            for item in self.emphasis_items:
+                emphasis_section += f"- {item.title}: {item.significance}\n"
+            emphasis_section += "\nThese items should be central to your argumentation strategy."
+        
         return f"""You are the Crown Prosecution barrister in a British Crown Court murder trial.
 
 Case: {case_content.title}
@@ -185,6 +200,7 @@ Evidence available:
 
 STRATEGIC FOCUS - Your strongest arguments:
 {key_strengths}
+{emphasis_section}
 
 Your role is to:
 - Present the case for the Crown with conviction and clarity
@@ -249,6 +265,14 @@ CRITICAL: Only reference evidence that has been presented in earlier stages. Do 
         if self.complexity_level:
             complexity_guidance = self.complexity_analyzer.get_complexity_guidance(self.complexity_level)
         
+        # Add prosecution emphasis awareness (Task 26.3)
+        prosecution_focus = ""
+        if hasattr(self, 'emphasis_items') and self.emphasis_items:
+            prosecution_focus = "\n\nTHE PROSECUTION WILL FOCUS ON:\n"
+            for item in self.emphasis_items:
+                prosecution_focus += f"- {item.title}: {item.significance}\n"
+            prosecution_focus += "\nPrepare counter-arguments and alternative interpretations for these items."
+        
         return f"""You are the Defence barrister in a British Crown Court murder trial.
 
 Case: {case_content.title}
@@ -260,6 +284,7 @@ Evidence available:
 
 STRATEGIC FOCUS - Your strongest defensive arguments:
 {key_strengths}
+{prosecution_focus}
 
 Your role is to:
 - Defend your client vigorously and create reasonable doubt
@@ -442,6 +467,13 @@ Be authoritative, fair, and clear in your instructions.
         
         # Use LLM service if available, otherwise use fallback
         if self.llm_service:
+            # Check if rate limiter would block
+            rate_limit_warning = False
+            if hasattr(self.llm_service, '_rate_limiter'):
+                # Estimate tokens (same logic as in generate_response)
+                estimated_tokens = len(agent.system_prompt.split()) + len(user_prompt.split()) + agent.character_limit
+                rate_limit_warning = self.llm_service._rate_limiter.check_would_block(estimated_tokens)
+            
             try:
                 content, used_fallback = await self.llm_service.generate_with_fallback(
                     system_prompt=agent.system_prompt,
@@ -464,7 +496,30 @@ Be authoritative, fair, and clear in your instructions.
                     agent_role=agent_role,
                     content=content,
                     timestamp=datetime.now(),
-                    metadata={"stage": stage.value, "used_fallback": used_fallback}
+                    metadata={
+                        "stage": stage.value,
+                        "used_fallback": used_fallback,
+                        "rate_limit_warning": rate_limit_warning
+                    }
+                )
+            except asyncio.TimeoutError as e:
+                # Timeout-specific error handling
+                logger.error(f"Agent {agent_role} response timed out: {e}")
+                await metrics_collector.end_agent_response(
+                    agent_metrics,
+                    success=False,
+                    error=f"Timeout: {str(e)}"
+                )
+                # Return fallback with timeout metadata
+                return AgentResponse(
+                    agent_role=agent_role,
+                    content=fallback,
+                    timestamp=datetime.now(),
+                    metadata={
+                        "stage": stage.value,
+                        "timeout": True,
+                        "fallback": True
+                    }
                 )
             except Exception as e:
                 logger.error(f"Agent response generation failed: {e}")

@@ -10,6 +10,7 @@ from orchestrator import ExperienceOrchestrator
 from state_machine import ExperienceState
 from config import load_config
 from trial_orchestrator import AgentResponse
+from metrics import get_metrics_collector
 
 logger = logging.getLogger("veritas")
 
@@ -41,6 +42,7 @@ class MultiBotService:
         self.group_users: Dict[str, set] = {}
         
         self.running = False
+        self.cleanup_task: Optional[asyncio.Task] = None
         
         # Log configured bots
         configured_roles = self.multi_bot.get_configured_roles()
@@ -81,6 +83,10 @@ class MultiBotService:
         self.running = True
         logger.info("Polling for messages every 1 second...")
 
+        # Start session cleanup task (Task 27.1)
+        self.cleanup_task = asyncio.create_task(self._session_cleanup_task())
+        logger.info("Started session cleanup task (checks every 5 minutes)")
+
         # Poll ALL bots — Luffa delivers group messages to each bot independently
         while self.running:
             try:
@@ -118,10 +124,13 @@ class MultiBotService:
 
     async def handle_command(self, command: str, group_id: str, sender_uid: str, msg_type: int):
         """Handle bot commands."""
-        cmd = command.lower().split()[0]
+        parts = command.split()
+        cmd = parts[0].lower()
         
         if cmd == "/start":
-            await self.start_trial(group_id, sender_uid)
+            # Parse optional case_id argument: /start [case_id]
+            case_id = parts[1] if len(parts) > 1 else None
+            await self.start_trial(group_id, sender_uid, case_id)
         
         elif cmd == "/continue":
             await self.continue_trial(group_id, sender_uid)
@@ -136,11 +145,20 @@ class MultiBotService:
         elif cmd == "/status":
             await self.show_status(group_id, sender_uid)
         
+        elif cmd == "/cases":
+            await self.show_cases(group_id)
+        
         elif cmd == "/help":
             await self.show_help(group_id)
 
         elif cmd == "/stop":
             await self.stop_trial(group_id, sender_uid)
+        
+        elif cmd == "/metrics":
+            await self.show_metrics(group_id, sender_uid)
+        
+        elif cmd == "/sessions":
+            await self.show_sessions(group_id, sender_uid)
 
         else:
             await self.multi_bot.send_as_agent(
@@ -149,8 +167,14 @@ class MultiBotService:
                 "Unknown command. Type /help for available commands."
             )
 
-    async def start_trial(self, group_id: str, sender_uid: str):
-        """Start a new trial."""
+    async def start_trial(self, group_id: str, sender_uid: str, case_id: Optional[str] = None):
+        """Start a new trial.
+        
+        Args:
+            group_id: Group ID
+            sender_uid: User who initiated the trial
+            case_id: Optional case ID to use. If not provided, randomly selects from available cases.
+        """
         if not sender_uid:
             await self.multi_bot.send_as_agent(
                 "clerk",
@@ -169,12 +193,32 @@ class MultiBotService:
             )
             return
         
+        # Select case: use provided case_id or randomly select from available cases
+        if case_id is None:
+            from case_manager import CaseManager
+            import random
+            
+            case_manager = CaseManager()
+            available_cases = case_manager.list_available_cases()
+            
+            if not available_cases:
+                await self.multi_bot.send_as_agent(
+                    "clerk",
+                    group_id,
+                    "❌ No cases available. Please contact the administrator."
+                )
+                return
+            
+            # Randomly select a case
+            case_id, _ = random.choice(available_cases)
+            logger.info(f"Randomly selected case: {case_id}")
+        
         # Create new session
         session_id = self._create_session_id(sender_uid, group_id)
         orchestrator = ExperienceOrchestrator(
             session_id=session_id,
             user_id=sender_uid,
-            case_id="blackthorn-hall-001"
+            case_id=case_id
         )
         
         # Initialize
@@ -323,6 +367,26 @@ class MultiBotService:
         """
         agent_role = response["agentRole"]
         content = response["content"]
+        metadata = response.get("metadata", {})
+        
+        # Check for rate limit warning
+        if metadata.get("rate_limit_warning"):
+            await self.multi_bot.send_as_agent(
+                "clerk",
+                group_id,
+                "⏳ The court needs a moment..."
+            )
+            await asyncio.sleep(1)
+        
+        # Check for timeout
+        if metadata.get("timeout"):
+            role_display = agent_role.replace("_", " ").title()
+            await self.multi_bot.send_as_agent(
+                "clerk",
+                group_id,
+                f"⚠️ {role_display} is composing their response..."
+            )
+            await asyncio.sleep(1)
         
         # Map agent role to bot role
         role_mapping = {
@@ -367,16 +431,26 @@ class MultiBotService:
         result = await orchestrator.submit_deliberation_statement(statement)
         
         if result["success"]:
-            # Send AI juror responses
+            # Send AI juror responses with persona identity
             # Note: If juror bots configured, could send from those bots
             # For now, send from clerk bot
-            for turn in result["turns"][1:]:
+            for turn in result["turns"][1:]:  # Skip user's own turn
+                juror_id = turn["jurorId"]
                 juror_statement = turn["statement"]
+                
+                # Get juror display info (emoji and name)
+                emoji, name = orchestrator.jury_orchestrator.get_juror_display_info(juror_id)
+                
+                # Extract juror number from juror_id (e.g., "juror_1" -> "1")
+                juror_num = juror_id.replace("juror_", "")
+                
+                # Format: "{emoji} {name} (Juror {n}): {statement}"
+                formatted_message = f"{emoji} {name} (Juror {juror_num}): {juror_statement}"
                 
                 await self.multi_bot.send_as_agent(
                     "clerk",
                     group_id,
-                    f"👤 AI Juror: {juror_statement}"
+                    formatted_message
                 )
                 await asyncio.sleep(1)
             
@@ -488,9 +562,34 @@ class MultiBotService:
                     persona = (juror.get("persona") or "").replace("_", " ").title()
                     vote_text = juror["vote"].replace("_", " ").title()
 
-                    juror_text += f"• **{juror['jurorId']}**: {persona or 'Juror'} - Voted {vote_text}\n"
+                    juror_text += f"• **{juror['jurorId']}**: {persona or 'Juror'} — Voted {vote_text}\n"
+
+                    # Show vote reasoning if available
+                    key_statements = juror.get("keyStatements", [])
+                    for stmt in key_statements:
+                        if stmt.startswith("Vote reasoning:"):
+                            juror_text += f"  _{stmt[len('Vote reasoning: '):]}_\n"
 
             await self.multi_bot.send_as_agent("clerk", group_id, juror_text)
+            await asyncio.sleep(2)
+            
+            # 5. Case statistics (Task 26.4)
+            orchestrator = self._get_user_orchestrator(sender_uid)
+            if orchestrator:
+                from metrics import get_metrics_collector
+                
+                metrics_collector = get_metrics_collector()
+                case_stats = metrics_collector.get_case_verdict_stats(orchestrator.case_id)
+                
+                if case_stats["total"] > 0:
+                    stats_text = f"""📊 **CASE STATISTICS**
+
+{case_stats['total']} users have tried this case.
+• {case_stats['guilty_pct']}% voted guilty
+• {case_stats['not_guilty_pct']}% voted not guilty"""
+                    
+                    await self.multi_bot.send_as_agent("clerk", group_id, stats_text)
+                    await asyncio.sleep(2)
 
             # Complete
             await self.multi_bot.send_as_agent(
@@ -608,12 +707,52 @@ class MultiBotService:
             "⚖️ Trial stopped and session cleared.\n\nType /start to begin a new trial."
         )
 
+    async def show_cases(self, group_id: str):
+        """Show available cases with complexity levels."""
+        from case_manager import CaseManager
+        from complexity_analyzer import CaseComplexityAnalyzer
+        
+        case_manager = CaseManager()
+        available_cases = case_manager.list_available_cases()
+        
+        if not available_cases:
+            await self.multi_bot.send_as_agent(
+                "clerk",
+                group_id,
+                "❌ No cases available."
+            )
+            return
+        
+        # Build case list with complexity
+        cases_text = "📋 AVAILABLE CASES\n\n"
+        
+        for idx, (case_id, title) in enumerate(available_cases, 1):
+            try:
+                # Load case and analyze complexity
+                case_content = case_manager.load_case(case_id)
+                analyzer = CaseComplexityAnalyzer()
+                complexity = analyzer.analyze_complexity(case_content)
+                complexity_level = complexity.level.title()
+                
+                cases_text += f"{idx}. {title}\n"
+                cases_text += f"   Case ID: {case_id}\n"
+                cases_text += f"   Complexity: {complexity_level}\n\n"
+            except Exception as e:
+                logger.warning(f"Failed to load case {case_id}: {e}")
+                cases_text += f"{idx}. {title}\n"
+                cases_text += f"   Case ID: {case_id}\n\n"
+        
+        cases_text += "Type /start <case-id> to begin a specific case,\nor /start to randomly select one."
+        
+        await self.multi_bot.send_as_agent("clerk", group_id, cases_text)
+
     async def show_help(self, group_id: str):
         """Show help message."""
         help_text = """🎭 VERITAS COURTROOM EXPERIENCE
 
 Commands:
-• /start - Begin a new trial
+• /start [case-id] - Begin a new trial (random case if no ID provided)
+• /cases - List all available cases
 • /stop - Stop current trial
 • /continue - Advance to next stage
 • /vote guilty - Vote guilty
@@ -633,6 +772,107 @@ Commands:
 Each agent is a separate bot for a realistic courtroom experience!"""
         
         await self.multi_bot.send_as_agent("clerk", group_id, help_text)
+
+    async def show_metrics(self, group_id: str, sender_uid: str):
+        """Show performance metrics (admin only)."""
+        # Check if sender is admin
+        if sender_uid not in self.config.admin_uids:
+            await self.multi_bot.send_as_agent(
+                "clerk",
+                group_id,
+                "⚠️ This command is only available to administrators."
+            )
+            return
+        
+        # Get metrics summary
+        metrics_collector = get_metrics_collector()
+        summary = metrics_collector.get_summary()
+        
+        # Format as readable text
+        metrics_text = "📊 VERITAS PERFORMANCE METRICS\n\n"
+        
+        # Agent responses
+        agent_overall = summary["agent_responses"]["overall"]
+        metrics_text += f"**Agent Responses:**\n"
+        metrics_text += f"• Total calls: {agent_overall['count']}\n"
+        metrics_text += f"• Avg duration: {agent_overall.get('avg_duration_ms', 0):.0f}ms\n"
+        metrics_text += f"• P95 duration: {agent_overall.get('p95_duration_ms', 0):.0f}ms\n"
+        metrics_text += f"• Success rate: {agent_overall.get('success_rate', 0):.1%}\n"
+        metrics_text += f"• Fallback rate: {agent_overall.get('fallback_rate', 0):.1%}\n\n"
+        
+        # By role
+        if summary["agent_responses"]["by_role"]:
+            metrics_text += "**By Role:**\n"
+            for role, stats in summary["agent_responses"]["by_role"].items():
+                metrics_text += f"• {role}: {stats['count']} calls, avg {stats.get('avg_duration_ms', 0):.0f}ms\n"
+            metrics_text += "\n"
+        
+        # State transitions
+        state_stats = summary["state_transitions"]
+        metrics_text += f"**State Transitions:**\n"
+        metrics_text += f"• Total: {state_stats['count']}\n"
+        metrics_text += f"• Avg duration: {state_stats.get('avg_duration_ms', 0):.0f}ms\n"
+        metrics_text += f"• P95 duration: {state_stats.get('p95_duration_ms', 0):.0f}ms\n"
+        metrics_text += f"• Success rate: {state_stats.get('success_rate', 0):.1%}\n\n"
+        
+        # Reasoning evaluation
+        reasoning_stats = summary["reasoning_evaluation"]
+        metrics_text += f"**Reasoning Evaluations:**\n"
+        metrics_text += f"• Total: {reasoning_stats['count']}\n"
+        metrics_text += f"• Avg duration: {reasoning_stats.get('avg_duration_ms', 0):.0f}ms\n"
+        metrics_text += f"• Success rate: {reasoning_stats.get('success_rate', 0):.1%}\n"
+        if reasoning_stats.get("category_distribution"):
+            metrics_text += f"• Categories: {reasoning_stats['category_distribution']}\n"
+        metrics_text += "\n"
+        
+        # Sessions
+        session_stats = summary["sessions"]
+        metrics_text += f"**Sessions:**\n"
+        metrics_text += f"• Total: {session_stats['total_sessions']}\n"
+        metrics_text += f"• Completed: {session_stats['completed_sessions']}\n"
+        metrics_text += f"• Completion rate: {session_stats.get('completion_rate', 0):.1%}\n"
+        metrics_text += f"• Avg duration: {session_stats.get('avg_duration_ms', 0) / 1000:.1f}s\n"
+        metrics_text += f"• Avg agent calls: {session_stats.get('avg_agent_calls', 0):.1f}\n"
+        metrics_text += f"• Avg state transitions: {session_stats.get('avg_state_transitions', 0):.1f}\n"
+        
+        await self.multi_bot.send_as_agent("clerk", group_id, metrics_text)
+
+    async def show_sessions(self, group_id: str, sender_uid: str):
+        """Show active sessions (admin only)."""
+        # Check if sender is admin
+        if sender_uid not in self.config.admin_uids:
+            await self.multi_bot.send_as_agent(
+                "clerk",
+                group_id,
+                "⚠️ This command is only available to administrators."
+            )
+            return
+        
+        # Get active sessions
+        if not self.active_sessions:
+            await self.multi_bot.send_as_agent(
+                "clerk",
+                group_id,
+                "📋 No active sessions."
+            )
+            return
+        
+        sessions_text = f"📋 ACTIVE SESSIONS ({len(self.active_sessions)})\n\n"
+        
+        for session_id, orchestrator in self.active_sessions.items():
+            # Get session state and duration
+            current_state = orchestrator.user_session.current_state
+            start_time = orchestrator.user_session.start_time
+            duration_seconds = (datetime.now() - start_time).total_seconds()
+            duration_minutes = int(duration_seconds / 60)
+            
+            # Format session info
+            sessions_text += f"**Session:** {session_id}\n"
+            sessions_text += f"• State: {current_state}\n"
+            sessions_text += f"• Duration: {duration_minutes} minutes\n"
+            sessions_text += f"• Case: {orchestrator.user_session.case_id}\n\n"
+        
+        await self.multi_bot.send_as_agent("clerk", group_id, sessions_text)
 
     def _create_session_id(self, uid: str, group_id: str) -> str:
         """Create session ID for user."""
@@ -680,10 +920,99 @@ Each agent is a separate bot for a realistic courtroom experience!"""
             if not self.group_users[group_id]:
                 del self.group_users[group_id]
 
+    async def _session_cleanup_task(self):
+        """
+        Background task that checks for inactive sessions and cleans them up.
+        
+        Runs every 5 minutes and:
+        - Sends warning at 30 min inactive via clerk bot
+        - Cleans up at 60 min inactive with timeout message
+        
+        Task 27.1: Session timeout and auto-cleanup
+        """
+        logger.info("Session cleanup task started")
+        
+        try:
+            while self.running:
+                await asyncio.sleep(300)  # 5 minutes
+                
+                if not self.running:
+                    break
+                
+                now = datetime.now()
+                sessions_to_cleanup = []
+                
+                for session_id, orchestrator in list(self.active_sessions.items()):
+                    if not orchestrator.user_session:
+                        continue
+                    
+                    last_activity = orchestrator.user_session.last_activity_time
+                    inactive_duration = (now - last_activity).total_seconds() / 60  # minutes
+                    
+                    # Get user_id and group_id for this session
+                    user_id = orchestrator.user_session.user_id
+                    
+                    # Extract group_id from session_id (format: luffa_{group_id}_{uid}_{timestamp})
+                    parts = session_id.split("_")
+                    if len(parts) >= 3:
+                        group_id = parts[1]
+                    else:
+                        logger.warning(f"Cannot parse group_id from session_id: {session_id}")
+                        continue
+                    
+                    # Check for 60 min timeout (cleanup)
+                    if inactive_duration >= 60:
+                        logger.info(f"Session {session_id} inactive for {inactive_duration:.1f} min - timing out")
+                        sessions_to_cleanup.append((user_id, group_id, session_id))
+                    
+                    # Check for 30 min warning
+                    elif inactive_duration >= 30:
+                        # Check if we've already sent a warning (use metadata to track)
+                        # For simplicity, we'll send warning each time we check (every 5 min)
+                        # In production, you might want to track "warning_sent" flag
+                        logger.info(f"Session {session_id} inactive for {inactive_duration:.1f} min - sending warning")
+                        try:
+                            await self.multi_bot.send_as_agent(
+                                "clerk",
+                                group_id,
+                                f"⚠️ Your trial has been inactive for {int(inactive_duration)} minutes. "
+                                f"The session will timeout after 60 minutes of inactivity.\n\n"
+                                f"Type /continue or /status to keep your session active."
+                            )
+                        except Exception as e:
+                            logger.error(f"Failed to send warning for session {session_id}: {e}")
+                
+                # Cleanup timed-out sessions
+                for user_id, group_id, session_id in sessions_to_cleanup:
+                    try:
+                        await self.multi_bot.send_as_agent(
+                            "clerk",
+                            group_id,
+                            "⏰ Trial timed out due to inactivity."
+                        )
+                        await self._cleanup_user_session(user_id, group_id)
+                        logger.info(f"Cleaned up inactive session {session_id}")
+                    except Exception as e:
+                        logger.error(f"Failed to cleanup session {session_id}: {e}")
+        
+        except asyncio.CancelledError:
+            logger.info("Session cleanup task cancelled")
+            raise
+        except Exception as e:
+            logger.error(f"Error in session cleanup task: {e}")
+
     async def shutdown(self):
         """Gracefully shut down the service, cleaning up all active sessions."""
         logger.info("Shutting down Multi-Bot service...")
         self.running = False
+
+        # Cancel cleanup task (Task 27.1)
+        if self.cleanup_task and not self.cleanup_task.done():
+            self.cleanup_task.cancel()
+            try:
+                await self.cleanup_task
+            except asyncio.CancelledError:
+                logger.info("Session cleanup task cancelled")
 
         # Cleanup all active sessions
         for session_id, orchestrator in list(self.active_sessions.items()):

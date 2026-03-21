@@ -1581,10 +1581,10 @@ def case_content_strategy():
 - Load testing (Phase 24.5 COMPLETE - tests/load/ with concurrent user simulation, 500+ ops/sec validated)
 
 **Planned (Not Started):**
+- AI jury intelligence (Phase 25 - LLM-based voting replacing deterministic heuristics, evidence-aware deliberation prompts, inter-juror debate dynamics, juror persona identity in messages)
+- Case system & replayability (Phase 26 - `/start [case_id]` selection, `/cases` listing, prosecution/defence emphasis variation per run, post-trial aggregate statistics)
+- Production hardening (Phase 27 - session timeout auto-cleanup, graceful bot failover, `/metrics` and `/sessions` admin commands, user-visible rate limit feedback)
 - Property-based tests for all 40 correctness properties (optional, marked with * in tasks.md)
-- User experience enhancements (Phase 25 - progress indicators, pause/resume, evidence search UI, tutorial, accessibility)
-- Analytics and insights (Phase 26 - reasoning patterns, verdict distributions, agent performance monitoring, admin dashboard)
-- Documentation completion (Phase 27 - API docs, deployment guide, operator manual, user guide)
 
 **Stub Implementations (Interfaces Exist, Not Production-Ready):**
 - SuperBox visual rendering: Basic scene models and rendering methods exist in luffa_integration.py, but no actual visual rendering implementation. Text-only fallbacks are used in production.
@@ -1592,11 +1592,12 @@ def case_content_strategy():
 - WebSocket real-time updates: Basic WebSocket endpoint exists in api.py, but multi-bot polling (1-second intervals) is the primary production interface for message delivery.
 
 **Future Enhancements:**
+- Web frontend consuming FastAPI backend (React/Vue)
+- Witness bots — 2 interactive witness characters users can cross-examine
+- LLM-based juror opinion evolution — jurors shift position across deliberation rounds
+- Case authoring CLI — guided case creation with automatic complexity scoring
+- Multi-language support for prompts and UI text
 - Advanced analytics dashboard for trial outcomes
-- Case authoring tools and validation
-- Multi-language support
-- Accessibility improvements for screen readers
-- Mobile-optimized SuperBox rendering
 
 ### Unit Testing
 

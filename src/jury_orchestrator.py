@@ -1,5 +1,6 @@
 """Jury layer orchestration for VERITAS courtroom experience."""
 
+import json
 from datetime import datetime
 from typing import Optional, Literal
 import hashlib
@@ -10,8 +11,16 @@ from models import CaseContent
 from session import DeliberationTurn
 from llm_service import LLMService
 from complexity_analyzer import CaseComplexityAnalyzer, ComplexityLevel
+from reasoning_evaluator import ReasoningEvaluator
 
 logger = logging.getLogger("veritas")
+
+# Juror persona display mapping (emoji, display name)
+JUROR_DISPLAY = {
+    "evidence_purist": ("🔬", "Evidence Purist"),
+    "sympathetic_doubter": ("🤔", "Sympathetic Doubter"),
+    "moral_absolutist": ("⚖️", "Moral Absolutist")
+}
 
 
 class JurorPersona(BaseModel):
@@ -97,6 +106,12 @@ class JuryOrchestrator:
         self.llm_service = llm_service
         self.complexity_analyzer = CaseComplexityAnalyzer()
         self.complexity_level: Optional[ComplexityLevel] = None
+        self.reasoning_evaluator: Optional[ReasoningEvaluator] = None
+        self.vote_reasoning: dict[str, str] = {}
+        # Track which evidence each juror has already engaged with
+        self.juror_engaged_evidence: dict[str, set[str]] = {}
+        # Track juror response rotation to ensure each responds at least every 2 rounds
+        self.juror_last_response_round: dict[str, int] = {}
 
     def initialize_jury(self, case_content: CaseContent) -> None:
         """
@@ -107,6 +122,12 @@ class JuryOrchestrator:
         """
         self.case_content = case_content
         self.jurors = []
+        
+        # Initialize reasoning evaluator with case content
+        self.reasoning_evaluator = ReasoningEvaluator(case_content)
+        
+        # Initialize engaged evidence tracking for all jurors
+        self.juror_engaged_evidence = {}
         
         # Analyze case complexity
         self.complexity_level = self.complexity_analyzer.analyze_complexity(case_content)
@@ -429,22 +450,70 @@ You contribute brief, thoughtful statements during deliberation. You listen to o
         turns.append(user_turn)
         self.deliberation_statements.append(user_turn)
         
-        # Generate responses from active AI jurors (within 15 seconds)
-        # TODO: Replace with actual LLM calls
-        for juror in self.jurors:
-            if juror.type == "active_ai":
-                ai_response = await self._generate_juror_response(juror, statement)
-                turns.append(ai_response)
-                self.deliberation_statements.append(ai_response)
+        # Calculate current round number (number of user statements)
+        current_round = len([t for t in self.deliberation_statements if t.juror_id == "juror_human"])
         
-        # Occasionally add lightweight juror responses
-        if len(self.deliberation_statements) % 3 == 0:
+        # Get active AI jurors
+        active_jurors = [j for j in self.jurors if j.type == "active_ai"]
+        
+        # Select 2 active jurors to respond this round
+        # Rotation logic: ensure each juror responds at least every 2 rounds
+        selected_jurors = self._select_responding_jurors(active_jurors, current_round)
+        
+        # Generate responses from selected active AI jurors (within 15 seconds)
+        for juror in selected_jurors:
+            ai_response = await self._generate_juror_response(juror, statement)
+            turns.append(ai_response)
+            self.deliberation_statements.append(ai_response)
+            # Update last response round for this juror
+            self.juror_last_response_round[juror.id] = current_round
+        
+        # Occasionally add lightweight juror responses (every 4th round instead of 3rd)
+        if len(self.deliberation_statements) % 4 == 0:
             lightweight = [j for j in self.jurors if j.type == "lightweight_ai"][0]
             lw_response = await self._generate_juror_response(lightweight, statement)
             turns.append(lw_response)
             self.deliberation_statements.append(lw_response)
         
         return turns
+    
+    def _select_responding_jurors(self, active_jurors: list[JurorPersona], current_round: int) -> list[JurorPersona]:
+        """
+        Select 2 of 3 active jurors to respond, ensuring each responds at least every 2 rounds.
+        
+        Args:
+            active_jurors: List of active AI jurors
+            current_round: Current round number (1-indexed)
+            
+        Returns:
+            List of 2 jurors to respond this round
+        """
+        # Initialize tracking if needed
+        for juror in active_jurors:
+            if juror.id not in self.juror_last_response_round:
+                self.juror_last_response_round[juror.id] = 0
+        
+        # Find jurors who haven't responded in the last round (must respond this round)
+        must_respond = [j for j in active_jurors 
+                       if current_round - self.juror_last_response_round[j.id] >= 2]
+        
+        # If 2+ jurors must respond, pick the 2 who haven't responded longest
+        if len(must_respond) >= 2:
+            must_respond.sort(key=lambda j: self.juror_last_response_round[j.id])
+            return must_respond[:2]
+        
+        # If 1 juror must respond, pick them + 1 other (rotate through remaining)
+        if len(must_respond) == 1:
+            others = [j for j in active_jurors if j not in must_respond]
+            # Pick the one who responded least recently
+            others.sort(key=lambda j: self.juror_last_response_round[j.id])
+            return [must_respond[0], others[0]]
+        
+        # No jurors are forced to respond, rotate through all 3
+        # Pick the 2 who responded least recently
+        active_jurors_sorted = sorted(active_jurors, 
+                                     key=lambda j: self.juror_last_response_round[j.id])
+        return active_jurors_sorted[:2]
 
     async def _generate_juror_response(self, juror: JurorPersona, context: str) -> DeliberationTurn:
         """
@@ -470,6 +539,39 @@ You contribute brief, thoughtful statements during deliberation. You listen to o
 Latest statement: {context}
 
 Respond to this statement as part of the deliberation. Keep your response under 200 words."""
+        
+        # Detect evidence references in the latest user statement
+        # Only process if we have a reasoning evaluator and the context is from the human juror
+        if self.reasoning_evaluator and self.case_content:
+            # Get the last user statement (human juror)
+            user_statements = [turn for turn in self.deliberation_statements if turn.juror_id == "juror_human"]
+            
+            if user_statements:
+                # Track evidence references from user statements
+                referenced_evidence_ids = self.reasoning_evaluator.track_evidence_references(user_statements)
+                
+                # Initialize engaged evidence set for this juror if not exists
+                if juror.id not in self.juror_engaged_evidence:
+                    self.juror_engaged_evidence[juror.id] = set()
+                
+                # Find new evidence that this juror hasn't engaged with yet
+                new_evidence_ids = [eid for eid in referenced_evidence_ids 
+                                   if eid not in self.juror_engaged_evidence[juror.id]]
+                
+                if new_evidence_ids:
+                    # Look up the EvidenceItem objects
+                    evidence_items = [e for e in self.case_content.evidence if e.id in new_evidence_ids]
+                    
+                    if evidence_items:
+                        # Append USER REFERENCED EVIDENCE section to the prompt
+                        evidence_section = "\n\nUSER REFERENCED EVIDENCE:\n"
+                        for item in evidence_items:
+                            evidence_section += f"- {item.title}: {item.description}\n"
+                        
+                        user_prompt += evidence_section
+                        
+                        # Mark these evidence items as engaged by this juror
+                        self.juror_engaged_evidence[juror.id].update(new_evidence_ids)
         
         # Generate fallback based on persona
         if juror.persona == "evidence_purist":
@@ -559,40 +661,119 @@ Respond to this statement as part of the deliberation. Keep your response under 
             timestamp=datetime.now()
         ))
         
-        # Collect AI juror votes
-        # TODO: Replace with actual LLM-based voting
+        # Collect AI juror votes with LLM-based decision making
         for juror in self.jurors:
             if juror.type != "human":
-                # Placeholder: random vote based on persona
-                ai_vote = self._generate_ai_vote(juror)
+                # Get LLM-based vote with reasoning
+                ai_vote, reasoning = await self._generate_ai_vote(juror)
                 votes.append(JurorVote(
                     juror_id=juror.id,
                     vote=ai_vote,
                     timestamp=datetime.now()
                 ))
+                
+                # Store reasoning for dual reveal
+                self.vote_reasoning[juror.id] = reasoning
         
         # Calculate verdict
         return self.calculate_verdict(votes)
 
-    def _generate_ai_vote(self, juror: JurorPersona) -> Literal["guilty", "not_guilty"]:
+    async def _generate_ai_vote(self, juror: JurorPersona) -> tuple[Literal["guilty", "not_guilty"], str]:
         """
-        Generate vote for AI juror based on their deliberation.
+        Generate vote for AI juror based on their deliberation using LLM.
         
-        For now uses heuristic based on persona. In production, this would
-        use LLM to analyze the juror's statements and case evidence.
+        Args:
+            juror: The juror persona to generate a vote for
+            
+        Returns:
+            Tuple of (vote, reasoning) where reasoning is the juror's rationale
         """
-        # TODO: Replace with LLM-based decision making
-        # Could analyze juror's own statements during deliberation
-        # and ask them to vote based on their reasoning
+        # Fallback heuristic based on persona
+        def get_fallback_vote() -> Literal["guilty", "not_guilty"]:
+            if juror.persona == "sympathetic_doubter":
+                return "not_guilty"
+            elif juror.persona == "moral_absolutist":
+                return "guilty"
+            else:
+                # Evidence purist and lightweight: balanced
+                digest = int(hashlib.md5(juror.id.encode()).hexdigest(), 16)
+                return "guilty" if digest % 2 == 0 else "not_guilty"
         
-        if juror.persona == "sympathetic_doubter":
-            return "not_guilty"
-        elif juror.persona == "moral_absolutist":
-            return "guilty"
-        else:
-            # Evidence purist and lightweight: balanced
-            digest = int(hashlib.md5(juror.id.encode()).hexdigest(), 16)
-            return "guilty" if digest % 2 == 0 else "not_guilty"
+        # If no LLM service available, use fallback
+        if not self.llm_service or not juror.system_prompt:
+            fallback_vote = get_fallback_vote()
+            return fallback_vote, f"Vote based on persona: {juror.persona or 'balanced'}"
+        
+        # Build evidence summary (full descriptions for informed voting)
+        evidence_summary = ""
+        if self.case_content:
+            evidence_items = []
+            for item in self.case_content.evidence:
+                evidence_items.append(f"- {item.title} ({item.type}): {item.description}")
+            evidence_summary = "\n".join(evidence_items)
+
+        # Get the full deliberation transcript (user + all jurors)
+        deliberation_transcript = []
+        for turn in self.deliberation_statements:
+            speaker = "Human Juror" if turn.juror_id == "juror_human" else turn.juror_id
+            deliberation_transcript.append(f"{speaker}: {turn.statement}")
+        transcript_text = "\n".join(deliberation_transcript[-15:]) if deliberation_transcript else "No deliberation occurred."
+
+        # Get this juror's own statements
+        juror_statements = [
+            turn.statement
+            for turn in self.deliberation_statements
+            if turn.juror_id == juror.id
+        ]
+        own_statements_text = "\n".join([f"- {stmt}" for stmt in juror_statements]) if juror_statements else "You did not speak during deliberation."
+
+        # Build prompt for voting decision
+        user_prompt = f"""The jury deliberation has concluded. You must now cast your vote.
+
+EVIDENCE SUMMARY:
+{evidence_summary}
+
+DELIBERATION TRANSCRIPT (recent):
+{transcript_text}
+
+YOUR OWN STATEMENTS:
+{own_statements_text}
+
+Based on the evidence, the full deliberation, and your own reasoning, decide: Is the defendant GUILTY or NOT GUILTY?
+
+You MUST respond with valid JSON only, in this exact format:
+{{"vote": "guilty", "reasoning": "Your rationale in 1-2 sentences"}}
+or
+{{"vote": "not_guilty", "reasoning": "Your rationale in 1-2 sentences"}}"""
+        
+        try:
+            # Use LLM with temperature 0.3 for consistency, 10s timeout
+            response = await self.llm_service.generate_response(
+                system_prompt=juror.system_prompt,
+                user_prompt=user_prompt,
+                max_tokens=150,
+                temperature=0.3,
+                timeout=10,
+                response_format={"type": "json_object"}
+            )
+            
+            # Parse JSON response
+            result = json.loads(response)
+            vote = result.get("vote", "").lower().replace(" ", "_")
+            reasoning = result.get("reasoning", "")
+            
+            # Validate vote
+            if vote not in ["guilty", "not_guilty"]:
+                logger.warning(f"Invalid vote '{vote}' from {juror.id}, using fallback")
+                fallback_vote = get_fallback_vote()
+                return fallback_vote, f"Fallback vote due to invalid response: {juror.persona or 'balanced'}"
+            
+            return vote, reasoning
+            
+        except Exception as e:
+            logger.warning(f"LLM voting failed for {juror.id}: {e}, using fallback")
+            fallback_vote = get_fallback_vote()
+            return fallback_vote, f"Fallback vote due to error: {juror.persona or 'balanced'}"
 
     def calculate_verdict(self, votes: list[JurorVote]) -> VoteResult:
         """
@@ -651,11 +832,17 @@ Respond to this statement as part of the deliberation. Keep your response under 
                 # Get key statements for active AI jurors
                 key_statements = []
                 if juror.type == "active_ai":
+                    # Include deliberation statements
                     key_statements = [
                         turn.statement 
                         for turn in self.deliberation_statements 
                         if turn.juror_id == juror.id
                     ][:2]  # First 2 statements
+                
+                # Add vote reasoning if available
+                if juror.id in self.vote_reasoning:
+                    vote_reasoning = self.vote_reasoning[juror.id]
+                    key_statements.append(f"Vote reasoning: {vote_reasoning}")
                 
                 reveals.append(JurorReveal(
                     juror_id=juror.id,
@@ -666,3 +853,29 @@ Respond to this statement as part of the deliberation. Keep your response under 
                 ))
         
         return reveals
+
+    def get_juror_display_info(self, juror_id: str) -> tuple[str, str]:
+        """
+        Get display information for a juror.
+        
+        Args:
+            juror_id: The juror ID
+            
+        Returns:
+            Tuple of (emoji, display_name) for the juror
+        """
+        juror = next((j for j in self.jurors if j.id == juror_id), None)
+        
+        if not juror:
+            return ("👤", "AI Juror")
+        
+        if juror.type == "human":
+            return ("👤", "You")
+        
+        # Get persona display info
+        if juror.persona and juror.persona in JUROR_DISPLAY:
+            return JUROR_DISPLAY[juror.persona]
+        
+        # Fallback for lightweight jurors or unknown personas
+        juror_num = juror_id.replace("juror_", "")
+        return ("👤", f"Juror {juror_num}")

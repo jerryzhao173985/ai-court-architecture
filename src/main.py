@@ -15,11 +15,25 @@ async def run_demo_experience():
     print("=" * 60)
     print()
     
-    # Initialize orchestrator
+    # Initialize orchestrator with random case selection
+    from case_manager import CaseManager
+    import random
+    
+    case_manager = CaseManager()
+    available_cases = case_manager.list_available_cases()
+    
+    if not available_cases:
+        print("❌ No cases available")
+        return
+    
+    case_id, case_title = random.choice(available_cases)
+    print(f"Selected case: {case_title} ({case_id})")
+    print()
+    
     orchestrator = ExperienceOrchestrator(
         session_id="demo_session_001",
         user_id="demo_user",
-        case_id="blackthorn-hall-001"
+        case_id=case_id
     )
     
     # Initialize experience

@@ -62,6 +62,8 @@ class SessionMetrics:
     final_state: Optional[str] = None
     agent_calls: int = 0
     state_transitions: int = 0
+    verdict: Optional[str] = None  # Task 26.4: Track verdict for case statistics
+    bot_failovers: int = 0  # Task 27.2: Track bot failover count
 
 
 class MetricsCollector:
@@ -411,7 +413,8 @@ class MetricsCollector:
         self,
         session_id: str,
         completed: bool = True,
-        final_state: Optional[str] = None
+        final_state: Optional[str] = None,
+        verdict: Optional[str] = None
     ):
         """
         Complete tracking a session.
@@ -420,6 +423,7 @@ class MetricsCollector:
             session_id: The session ID
             completed: Whether the session completed successfully
             final_state: The final state reached
+            verdict: The jury verdict (guilty/not_guilty) for case statistics
         """
         async with self._lock:
             if session_id in self._session_metrics:
@@ -428,6 +432,7 @@ class MetricsCollector:
                 metrics.duration_ms = (metrics.end_time - metrics.start_time) * 1000
                 metrics.completed = completed
                 metrics.final_state = final_state
+                metrics.verdict = verdict
     
     async def increment_session_agent_calls(self, session_id: str):
         """Increment agent call count for a session."""
@@ -440,6 +445,17 @@ class MetricsCollector:
         async with self._lock:
             if session_id in self._session_metrics:
                 self._session_metrics[session_id].state_transitions += 1
+    
+    async def record_bot_failover(self, session_id: str):
+        """
+        Record a bot failover event for a session.
+        
+        Args:
+            session_id: The session ID
+        """
+        async with self._lock:
+            if session_id in self._session_metrics:
+                self._session_metrics[session_id].bot_failovers += 1
     
     def get_session_completion_stats(self) -> Dict[str, Any]:
         """
@@ -499,6 +515,49 @@ class MetricsCollector:
             "state_transitions": self.get_state_transition_stats(),
             "reasoning_evaluation": self.get_reasoning_evaluation_stats(),
             "sessions": self.get_session_completion_stats()
+        }
+    
+    def get_case_verdict_stats(self, case_id: str) -> Dict[str, Any]:
+        """
+        Get verdict statistics for a specific case.
+        
+        Args:
+            case_id: The case ID to get statistics for
+            
+        Returns:
+            Dictionary with verdict statistics:
+            - total: Total number of completed sessions for this case
+            - guilty_count: Number of guilty verdicts
+            - not_guilty_count: Number of not guilty verdicts
+            - guilty_pct: Percentage of guilty verdicts
+            - not_guilty_pct: Percentage of not guilty verdicts
+        """
+        # Filter completed sessions for this case with verdicts
+        case_sessions = [
+            m for m in self._session_metrics.values()
+            if m.case_id == case_id and m.completed and m.verdict
+        ]
+        
+        total = len(case_sessions)
+        
+        if total == 0:
+            return {
+                "total": 0,
+                "guilty_count": 0,
+                "not_guilty_count": 0,
+                "guilty_pct": 0.0,
+                "not_guilty_pct": 0.0
+            }
+        
+        guilty_count = sum(1 for m in case_sessions if m.verdict == "guilty")
+        not_guilty_count = total - guilty_count
+        
+        return {
+            "total": total,
+            "guilty_count": guilty_count,
+            "not_guilty_count": not_guilty_count,
+            "guilty_pct": round((guilty_count / total) * 100, 1),
+            "not_guilty_pct": round((not_guilty_count / total) * 100, 1)
         }
     
     def log_summary(self):

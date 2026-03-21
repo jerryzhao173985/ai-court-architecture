@@ -204,3 +204,37 @@ class CaseManager:
             ValueError: If JSON is invalid or doesn't match schema
         """
         return CaseContent.deserialize(json_str)
+    
+    def list_available_cases(self) -> list[tuple[str, str]]:
+        """List all available case files in the cases directory.
+        
+        Scans the cases directory for *.json files, loads and validates each,
+        and returns a list of (case_id, title) tuples.
+        
+        Returns:
+            List of (case_id, title) tuples for all valid cases
+        """
+        available_cases = []
+        
+        # Scan directory for JSON files
+        if not self.cases_directory.exists():
+            logger.warning(f"Cases directory not found: {self.cases_directory}")
+            return available_cases
+        
+        for case_file in self.cases_directory.glob("*.json"):
+            # Skip sample_case.json as it's a template
+            if case_file.stem == "sample_case":
+                continue
+            
+            case_id = case_file.stem
+            
+            try:
+                # Try to load and validate the case
+                case_content = self.load_case(case_id)
+                available_cases.append((case_id, case_content.title))
+                logger.debug(f"Found valid case: {case_id} - {case_content.title}")
+            except Exception as e:
+                logger.warning(f"Skipping invalid case file {case_file}: {e}")
+                continue
+        
+        return available_cases

@@ -102,6 +102,7 @@ class AppConfig(BaseModel):
     session_storage: SessionStorageConfig = Field(default_factory=SessionStorageConfig, alias="sessionStorage")
     session_timeout_hours: int = Field(default=24, alias="sessionTimeoutHours")
     max_experience_minutes: int = Field(default=20, alias="maxExperienceMinutes")
+    admin_uids: list[str] = Field(default_factory=list, alias="adminUids")
 
 
 def load_config() -> AppConfig:
@@ -184,6 +185,10 @@ def load_config() -> AppConfig:
     # Legacy single-bot fallback
     legacy_bot_secret = os.getenv("LUFFA_BOT_SECRET")
     
+    # Admin UIDs (comma-separated list)
+    admin_uids_str = os.getenv("VERITAS_ADMIN_UIDS", "")
+    admin_uids = [uid.strip() for uid in admin_uids_str.split(",") if uid.strip()]
+    
     return AppConfig(
         llm=LLMConfig(
             provider=llm_provider,
@@ -228,5 +233,6 @@ def load_config() -> AppConfig:
             batchInterval=float(os.getenv("SESSION_BATCH_INTERVAL", "1.0"))
         ),
         sessionTimeoutHours=int(os.getenv("SESSION_TIMEOUT_HOURS", "24")),
-        maxExperienceMinutes=int(os.getenv("MAX_EXPERIENCE_MINUTES", "20"))
+        maxExperienceMinutes=int(os.getenv("MAX_EXPERIENCE_MINUTES", "20")),
+        adminUids=admin_uids
     )

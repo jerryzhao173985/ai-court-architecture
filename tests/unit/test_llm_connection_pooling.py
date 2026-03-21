@@ -317,3 +317,43 @@ async def test_rate_limiter_cleans_up_old_entries():
     assert len(limiter.request_times) == 2  # One old removed, one new added
     assert len(limiter.token_usage) == 2
     assert limiter.request_times[0] > old_time  # Old entry is gone
+
+
+@pytest.mark.asyncio
+async def test_rate_limiter_check_would_block():
+    """Test that check_would_block() correctly predicts blocking without modifying state."""
+    limiter = RateLimiter(max_requests_per_minute=3, max_tokens_per_minute=1000)
+    
+    # Initially should not block
+    assert limiter.check_would_block(100) is False
+    
+    # Add requests up to the limit
+    await limiter.acquire(estimated_tokens=100)
+    await limiter.acquire(estimated_tokens=100)
+    await limiter.acquire(estimated_tokens=100)
+    
+    # Now should predict blocking
+    assert limiter.check_would_block(100) is True
+    
+    # Verify state wasn't modified (still 3 requests)
+    assert len(limiter.request_times) == 3
+    assert len(limiter.token_usage) == 3
+
+
+@pytest.mark.asyncio
+async def test_rate_limiter_check_would_block_token_limit():
+    """Test that check_would_block() detects token limit blocking."""
+    limiter = RateLimiter(max_requests_per_minute=100, max_tokens_per_minute=500)
+    
+    # Use up most tokens
+    await limiter.acquire(estimated_tokens=400)
+    
+    # Should predict blocking for large request
+    assert limiter.check_would_block(200) is True
+    
+    # Should not block for small request
+    assert limiter.check_would_block(50) is False
+    
+    # Verify state wasn't modified
+    assert len(limiter.request_times) == 1
+    assert len(limiter.token_usage) == 1

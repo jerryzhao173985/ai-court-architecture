@@ -212,11 +212,14 @@ class ExperienceOrchestrator:
             Stage content and agent responses
         """
         try:
+            # Update activity timestamp for session timeout tracking
+            self.user_session.update_activity()
+
             # Get next state
             next_state = self.state_machine.get_next_state()
             if not next_state:
                 return {"success": False, "error": "No next stage available"}
-            
+
             # Transition to next state
             await self.state_machine.transition_to(next_state)
             self.user_session.current_state = next_state
@@ -308,6 +311,9 @@ class ExperienceOrchestrator:
             User turn and AI responses
         """
         try:
+            # Update activity timestamp for session timeout tracking
+            self.user_session.update_activity()
+
             # Process statement through jury orchestrator
             turns = await self.jury_orchestrator.process_user_statement(
                 statement, 
@@ -350,6 +356,9 @@ class ExperienceOrchestrator:
         """
         vote_result = None
         try:
+            # Update activity timestamp for session timeout tracking
+            self.user_session.update_activity()
+
             # Collect votes from all jurors
             vote_result = await self.jury_orchestrator.collect_votes(vote)
             
@@ -438,7 +447,8 @@ class ExperienceOrchestrator:
             await metrics_collector.end_session(
                 self.session_id,
                 completed=True,
-                final_state=ExperienceState.COMPLETED.value
+                final_state=ExperienceState.COMPLETED.value,
+                verdict=self.user_session.progress.vote  # Task 26.4: Track verdict for statistics
             )
             self._session_metrics_ended = True
             
@@ -909,10 +919,13 @@ How it works:
         # End session tracking if not already ended
         if self.user_session and not self._session_metrics_ended:
             metrics_collector = get_metrics_collector()
+            # Extract verdict from session progress if available
+            verdict = self.user_session.progress.vote if self.user_session.progress else None
             await metrics_collector.end_session(
                 self.session_id,
                 completed=completed,
-                final_state=self.user_session.current_state.value if self.user_session.current_state else "unknown"
+                final_state=self.user_session.current_state.value if self.user_session.current_state else "unknown",
+                verdict=verdict
             )
             self._session_metrics_ended = True
         

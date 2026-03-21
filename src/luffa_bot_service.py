@@ -40,6 +40,7 @@ class LuffaBotService:
         self.group_users: Dict[str, set] = {}
         
         self.running = False
+        self.cleanup_task: Optional[asyncio.Task] = None
 
     async def start(self):
         """Start the bot service with polling loop."""
@@ -57,6 +58,10 @@ class LuffaBotService:
         async with self.client:
             logger.info("✓ Connected to Luffa Bot API")
             logger.info("✓ Polling for messages every 1 second...")
+            
+            # Start session cleanup task (Task 27.1)
+            self.cleanup_task = asyncio.create_task(self._session_cleanup_task())
+            logger.info("Started session cleanup task (checks every 5 minutes)")
             
             while self.running:
                 try:
@@ -105,11 +110,14 @@ class LuffaBotService:
             msg_type: 0=DM, 1=Group
             msg: Full message object
         """
-        cmd = command.lower().split()[0]
+        parts = command.split()
+        cmd = parts[0].lower()
         sender_uid = msg.get("sender_uid") or uid  # Get actual user ID
         
         if cmd == "/start":
-            await self.start_trial(uid, msg_type, sender_uid)
+            # Parse optional case_id argument: /start [case_id]
+            case_id = parts[1] if len(parts) > 1 else None
+            await self.start_trial(uid, msg_type, sender_uid, case_id)
         
         elif cmd == "/continue":
             await self.continue_trial(uid, sender_uid)
@@ -124,6 +132,9 @@ class LuffaBotService:
         elif cmd == "/status":
             await self.show_status(uid, sender_uid)
         
+        elif cmd == "/cases":
+            await self.show_cases(uid, msg_type)
+        
         elif cmd == "/help":
             await self.show_help(uid, msg_type)
         
@@ -133,16 +144,17 @@ class LuffaBotService:
             else:  # DM
                 await self.client.send_dm(uid, "Unknown command. Type /help for available commands.")
 
-    async def start_trial(self, group_id: str, msg_type: int, sender_uid: str):
+    async def start_trial(self, group_id: str, msg_type: int, sender_uid: str, case_id: Optional[str] = None):
         """
         Start a new trial for a user in a group.
-        
+
         Supports multiple concurrent users in the same group (Task 22.4).
-        
+
         Args:
             group_id: Group ID
             msg_type: Message type
             sender_uid: User who initiated the trial
+            case_id: Optional case ID. If None, randomly selects from available cases.
         """
         if msg_type != 1:  # Must be group
             await self.client.send_dm(group_id, "Trials can only be started in group chats.")
@@ -172,12 +184,27 @@ class LuffaBotService:
             )
             return
         
+        # Select case: use provided case_id or randomly select
+        if case_id is None:
+            from case_manager import CaseManager
+            import random
+
+            case_manager = CaseManager()
+            available_cases = case_manager.list_available_cases()
+
+            if not available_cases:
+                await self.client.send_group_message(group_id, "❌ No cases available.")
+                return
+
+            case_id, _ = random.choice(available_cases)
+            logger.info(f"Randomly selected case: {case_id}")
+
         # Create new session
         session_id = self._get_or_create_session_id(sender_uid, group_id)
         orchestrator = ExperienceOrchestrator(
             session_id=session_id,
             user_id=sender_uid,
-            case_id="blackthorn-hall-001"
+            case_id=case_id  # Already selected above (provided or random)
         )
         
         # Initialize
@@ -273,7 +300,19 @@ class LuffaBotService:
             for response in result["agent_responses"]:
                 role = response["agentRole"].upper()
                 content = response["content"]
-                
+                metadata = response.get("metadata", {})
+
+                # Check for rate limit warning (Task 27.4)
+                if metadata.get("rate_limit_warning"):
+                    await self.client.send_group_message(group_id, "⏳ The court needs a moment...")
+                    await asyncio.sleep(1)
+
+                # Check for timeout (Task 27.4)
+                if metadata.get("timeout"):
+                    role_display = response["agentRole"].replace("_", " ").title()
+                    await self.client.send_group_message(group_id, f"⚠️ {role_display} is composing their response...")
+                    await asyncio.sleep(1)
+
                 # Format as character speaking
                 await self.client.send_group_message(
                     group_id,
@@ -329,13 +368,23 @@ class LuffaBotService:
         result = await orchestrator.submit_deliberation_statement(statement)
         
         if result["success"]:
-            # Send AI juror responses
+            # Send AI juror responses with persona identity
             for turn in result["turns"][1:]:  # Skip user turn
+                juror_id = turn["jurorId"]
                 juror_statement = turn["statement"]
+                
+                # Get juror display info (emoji and name)
+                emoji, name = orchestrator.jury_orchestrator.get_juror_display_info(juror_id)
+                
+                # Extract juror number from juror_id (e.g., "juror_1" -> "1")
+                juror_num = juror_id.replace("juror_", "")
+                
+                # Format: "{emoji} {name} (Juror {n}): {statement}"
+                formatted_message = f"{emoji} {name} (Juror {juror_num}): {juror_statement}"
                 
                 await self.client.send_group_message(
                     group_id,
-                    f"👤 AI Juror: {juror_statement}"
+                    formatted_message
                 )
                 await asyncio.sleep(1)
             
@@ -454,9 +503,34 @@ Coherence Score: {assessment['coherenceScore']:.2f}/1.0
                     persona = (juror.get("persona") or "").replace("_", " ").title()
                     vote_text = juror["vote"].replace("_", " ").title()
 
-                    juror_text += f"• {juror['jurorId']}: {persona or 'Juror'} - Voted {vote_text}\n"
+                    juror_text += f"• {juror['jurorId']}: {persona or 'Juror'} — Voted {vote_text}\n"
+
+                    # Show vote reasoning if available
+                    key_statements = juror.get("keyStatements", [])
+                    for stmt in key_statements:
+                        if stmt.startswith("Vote reasoning:"):
+                            juror_text += f"  {stmt[len('Vote reasoning: '):]}\n"
 
             await self.client.send_group_message(group_id, juror_text)
+            await asyncio.sleep(2)
+            
+            # 5. Case statistics (Task 26.4)
+            orchestrator = self._get_user_orchestrator(sender_uid)
+            if orchestrator:
+                from metrics import get_metrics_collector
+                
+                metrics_collector = get_metrics_collector()
+                case_stats = metrics_collector.get_case_verdict_stats(orchestrator.case_id)
+                
+                if case_stats["total"] > 0:
+                    stats_text = f"""📊 CASE STATISTICS
+
+{case_stats['total']} users have tried this case.
+• {case_stats['guilty_pct']}% voted guilty
+• {case_stats['not_guilty_pct']}% voted not guilty"""
+                    
+                    await self.client.send_group_message(group_id, stats_text)
+                    await asyncio.sleep(2)
 
             # Complete
             await self.client.send_group_message(
@@ -532,12 +606,55 @@ Coherence Score: {assessment['coherenceScore']:.2f}/1.0
         
         await self.client.send_group_message(group_id, text)
 
+    async def show_cases(self, uid: str, msg_type: int):
+        """Show available cases with complexity levels."""
+        from case_manager import CaseManager
+        from complexity_analyzer import CaseComplexityAnalyzer
+        
+        case_manager = CaseManager()
+        available_cases = case_manager.list_available_cases()
+        
+        if not available_cases:
+            message = "❌ No cases available."
+            if msg_type == 1:
+                await self.client.send_group_message(uid, message)
+            else:
+                await self.client.send_dm(uid, message)
+            return
+        
+        # Build case list with complexity
+        cases_text = "📋 AVAILABLE CASES\n\n"
+        
+        for idx, (case_id, title) in enumerate(available_cases, 1):
+            try:
+                # Load case and analyze complexity
+                case_content = case_manager.load_case(case_id)
+                analyzer = CaseComplexityAnalyzer()
+                complexity = analyzer.analyze_complexity(case_content)
+                complexity_level = complexity.level.title()
+                
+                cases_text += f"{idx}. {title}\n"
+                cases_text += f"   Case ID: {case_id}\n"
+                cases_text += f"   Complexity: {complexity_level}\n\n"
+            except Exception as e:
+                logger.warning(f"Failed to load case {case_id}: {e}")
+                cases_text += f"{idx}. {title}\n"
+                cases_text += f"   Case ID: {case_id}\n\n"
+        
+        cases_text += "Type /start <case-id> to begin a specific case,\nor /start to randomly select one."
+        
+        if msg_type == 1:  # Group
+            await self.client.send_group_message(uid, cases_text)
+        else:  # DM
+            await self.client.send_dm(uid, cases_text)
+
     async def show_help(self, uid: str, msg_type: int):
         """Show help message."""
         help_text = """🎭 VERITAS COURTROOM EXPERIENCE
 
 Commands:
-/start - Begin a new trial
+/start [case-id] - Begin a new trial (random case if no ID provided)
+/cases - List all available cases
 /continue - Advance to next stage
 /vote guilty - Vote guilty
 /vote not_guilty - Vote not guilty
@@ -564,6 +681,14 @@ The story adapts based on your participation!"""
         """Gracefully shut down the service, cleaning up all active sessions."""
         logger.info("Shutting down VERITAS Luffa Bot service...")
         self.running = False
+
+        # Cancel cleanup task (Task 27.1)
+        if self.cleanup_task and not self.cleanup_task.done():
+            self.cleanup_task.cancel()
+            try:
+                await self.cleanup_task
+            except asyncio.CancelledError:
+                logger.info("Session cleanup task cancelled")
 
         for session_id, orchestrator in list(self.active_sessions.items()):
             try:
@@ -615,8 +740,7 @@ The story adapts based on your participation!"""
     async def _get_or_restore_orchestrator(
         self, 
         uid: str, 
-        group_id: str,
-        case_id: str = "blackthorn-hall-001"
+        group_id: str
     ) -> Optional[ExperienceOrchestrator]:
         """
         Get existing orchestrator or restore from persistent storage.
@@ -626,8 +750,7 @@ The story adapts based on your participation!"""
         Args:
             uid: Luffa user ID
             group_id: Group ID
-            case_id: Case ID to load
-            
+
         Returns:
             ExperienceOrchestrator if found/restored, None if needs creation
         """
@@ -734,6 +857,83 @@ The story adapts based on your participation!"""
         if session_id:
             return self.active_sessions.get(session_id)
         return None
+
+    async def _session_cleanup_task(self):
+        """
+        Background task that checks for inactive sessions and cleans them up.
+        
+        Runs every 5 minutes and:
+        - Sends warning at 30 min inactive via clerk bot
+        - Cleans up at 60 min inactive with timeout message
+        
+        Task 27.1: Session timeout and auto-cleanup
+        """
+        logger.info("Session cleanup task started")
+        
+        try:
+            while self.running:
+                await asyncio.sleep(300)  # 5 minutes
+                
+                if not self.running:
+                    break
+                
+                now = datetime.now()
+                sessions_to_cleanup = []
+                
+                for session_id, orchestrator in list(self.active_sessions.items()):
+                    if not orchestrator.user_session:
+                        continue
+                    
+                    last_activity = orchestrator.user_session.last_activity_time
+                    inactive_duration = (now - last_activity).total_seconds() / 60  # minutes
+                    
+                    # Get user_id and group_id for this session
+                    user_id = orchestrator.user_session.user_id
+                    
+                    # Extract group_id from session_id (format: luffa_{group_id}_{uid}_{timestamp})
+                    parts = session_id.split("_")
+                    if len(parts) >= 3:
+                        group_id = parts[1]
+                    else:
+                        logger.warning(f"Cannot parse group_id from session_id: {session_id}")
+                        continue
+                    
+                    # Check for 60 min timeout (cleanup)
+                    if inactive_duration >= 60:
+                        logger.info(f"Session {session_id} inactive for {inactive_duration:.1f} min - timing out")
+                        sessions_to_cleanup.append((user_id, group_id, session_id))
+                    
+                    # Check for 30 min warning
+                    elif inactive_duration >= 30:
+                        # Send warning (every 5 min check if still inactive)
+                        logger.info(f"Session {session_id} inactive for {inactive_duration:.1f} min - sending warning")
+                        try:
+                            await self.client.send_group_message(
+                                group_id,
+                                f"⚠️ Your trial has been inactive for {int(inactive_duration)} minutes. "
+                                f"The session will timeout after 60 minutes of inactivity.\n\n"
+                                f"Type /continue or /status to keep your session active."
+                            )
+                        except Exception as e:
+                            logger.error(f"Failed to send warning for session {session_id}: {e}")
+                
+                # Cleanup timed-out sessions
+                for user_id, group_id, session_id in sessions_to_cleanup:
+                    try:
+                        await self.client.send_group_message(
+                            group_id,
+                            "⏰ Trial timed out due to inactivity."
+                        )
+                        await self._cleanup_user_session(user_id, group_id)
+                        logger.info(f"Cleaned up inactive session {session_id}")
+                    except Exception as e:
+                        logger.error(f"Failed to cleanup session {session_id}: {e}")
+        
+        except asyncio.CancelledError:
+            logger.info("Session cleanup task cancelled")
+            raise
+        except Exception as e:
+            logger.error(f"Error in session cleanup task: {e}")
 
 
 async def main():

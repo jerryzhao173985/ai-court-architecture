@@ -193,67 +193,124 @@ class MultiBotSDKClient:
         confirm: Optional[list[dict]] = None,
         is_dm: bool = False,
         dismiss_type: str = "select",
+        session_id: Optional[str] = None,
     ) -> bool:
         """
-        Send message as specific agent bot.
+        Send message as specific agent bot with retry and failover logic.
 
         API format (Luffa Bot API):
           /send      -> {secret, uid, msg: JSON.stringify({text})}
           /sendGroup -> {secret, uid, msg: JSON.stringify({text}), type: "1"|"2"}
+        
+        Task 27.2: On HTTP error or empty response, retry once after 1s.
+        If retry fails and role != "clerk", fallback to clerk bot with role prefix.
         """
         secret = self.get_bot_secret(agent_role)
         if not secret:
             logger.error(f"Cannot send as {agent_role}: no secret configured")
             return False
 
-        try:
-            if is_dm:
-                # DM — POST /robot/send
-                msg_json = json.dumps({"text": message})
-                await self._make_request(
-                    "/send",
-                    {"secret": secret, "uid": group_id, "msg": msg_json},
-                )
-                logger.info(f"Sent DM as {agent_role} to {group_id}")
-                return True
-            else:
-                # Group — POST /robot/sendGroup
-                msg_obj = {"text": message}
-                msg_type = "1"  # 1=text only, 2=with buttons
+        async def _attempt_send() -> tuple[bool, Optional[str]]:
+            """Attempt to send message. Returns (success, error_msg)."""
+            try:
+                if is_dm:
+                    # DM — POST /robot/send
+                    msg_json = json.dumps({"text": message})
+                    result = await self._make_request(
+                        "/send",
+                        {"secret": secret, "uid": group_id, "msg": msg_json},
+                    )
+                    # Check for empty response
+                    if not result or (isinstance(result, dict) and not result.get("msg")):
+                        return False, "Empty response from API"
+                    logger.info(f"Sent DM as {agent_role} to {group_id}")
+                    return True, None
+                else:
+                    # Group — POST /robot/sendGroup
+                    msg_obj = {"text": message}
+                    msg_type = "1"  # 1=text only, 2=with buttons
 
-                if buttons or confirm:
-                    msg_type = "2"
-                    if buttons:
-                        msg_obj["button"] = buttons
-                    if confirm:
-                        msg_obj["confirm"] = confirm
-                    msg_obj["dismissType"] = dismiss_type
+                    if buttons or confirm:
+                        msg_type = "2"
+                        if buttons:
+                            msg_obj["button"] = buttons
+                        if confirm:
+                            msg_obj["confirm"] = confirm
+                        msg_obj["dismissType"] = dismiss_type
 
-                msg_json = json.dumps(msg_obj)
-                await self._make_request(
-                    "/sendGroup",
-                    {
-                        "secret": secret,
-                        "uid": group_id,
-                        "msg": msg_json,
-                        "type": msg_type,
-                    },
-                )
-                logger.info(f"Sent group message as {agent_role} to {group_id}")
-                return True
+                    msg_json = json.dumps(msg_obj)
+                    result = await self._make_request(
+                        "/sendGroup",
+                        {
+                            "secret": secret,
+                            "uid": group_id,
+                            "msg": msg_json,
+                            "type": msg_type,
+                        },
+                    )
+                    # Check for empty response
+                    if not result or (isinstance(result, dict) and not result.get("msg")):
+                        return False, "Empty response from API"
+                    logger.info(f"Sent group message as {agent_role} to {group_id}")
+                    return True, None
 
-        except LuffaAPIError as e:
-            if "verification failed" in e.api_msg.lower():
-                logger.error(
-                    f"AUTH FAILED for {agent_role}: {e.api_msg} — "
-                    f"regenerate secret at https://robot.luffa.im"
-                )
-            else:
-                logger.error(f"Luffa API error sending as {agent_role}: {e}")
-            return False
-        except Exception as e:
-            logger.error(f"Failed to send as {agent_role}: {e}")
-            return False
+            except LuffaAPIError as e:
+                if "verification failed" in e.api_msg.lower():
+                    error_msg = f"AUTH FAILED: {e.api_msg}"
+                    logger.error(
+                        f"{error_msg} for {agent_role} — "
+                        f"regenerate secret at https://robot.luffa.im"
+                    )
+                else:
+                    error_msg = f"Luffa API error: {e}"
+                    logger.error(f"{error_msg} sending as {agent_role}")
+                return False, error_msg
+            except Exception as e:
+                error_msg = f"Exception: {e}"
+                logger.error(f"Failed to send as {agent_role}: {e}")
+                return False, error_msg
+
+        # First attempt
+        success, error = await _attempt_send()
+        if success:
+            return True
+
+        # Retry after 1 second
+        logger.warning(f"First attempt failed for {agent_role}: {error}. Retrying in 1s...")
+        await asyncio.sleep(1)
+        success, error = await _attempt_send()
+        if success:
+            return True
+
+        # Both attempts failed
+        logger.error(f"Both attempts failed for {agent_role}: {error}")
+
+        # Failover to clerk bot if not already clerk
+        if agent_role != "clerk" and self.has_bot_for_role("clerk"):
+            logger.warning(
+                f"Failing over to clerk bot for {agent_role} message. "
+                f"Original error: {error}"
+            )
+            
+            # Track failover in metrics if session_id provided
+            if session_id:
+                from metrics import get_metrics_collector
+                metrics = get_metrics_collector()
+                await metrics.record_bot_failover(session_id)
+            
+            # Prefix message with role
+            prefixed_message = f"[{agent_role.title()}] {message}"
+            
+            # Send via clerk bot (no buttons/confirm in failover)
+            return await self.send_as_agent(
+                agent_role="clerk",
+                group_id=group_id,
+                message=prefixed_message,
+                is_dm=is_dm,
+                session_id=session_id,
+            )
+
+        return False
 
     async def poll_messages(self, agent_role: str) -> list[dict]:
         """

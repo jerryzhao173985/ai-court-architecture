@@ -116,7 +116,7 @@ JURY_DELIBERATION → ANONYMOUS_VOTE → DUAL_REVEAL → COMPLETED
 - **3 Active AI Jurors** with distinct personas (Evidence Purist, Sympathetic Doubter, Moral Absolutist) — use GPT-4o
 - **4 Lightweight AI Jurors** — minimal responses via GPT-4o-mini
 - **1 Human Juror** — the user
-- **Voting**: Majority rule (5+ of 8 = verdict). AI votes are currently deterministic by persona, not LLM-based.
+- **Voting**: Majority rule (5+ of 8 = verdict). AI votes use LLM-based analysis of each juror's deliberation statements + case evidence (temperature 0.3, JSON response). Falls back to persona heuristic on LLM failure.
 - **Deliberation**: 6-minute hard cutoff. Active jurors respond within 15s per turn.
 
 ### Fact Checking
@@ -165,8 +165,7 @@ Copy `.env.example` to `.env`. Key groups:
 
 ## Known Limitations & Planned Work
 
-- AI juror votes are deterministic (hardcoded per persona) — planned: LLM-based voting
-- Only `blackthorn-hall-001` is wired as the default case in `multi_bot_service.py:177`
-- AI juror responses come from clerk bot — planned: separate juror bots (7 additional bots)
+- Only `blackthorn-hall-001` is wired as the default case in `multi_bot_service.py:177` — planned: `/start [case_id]` selection (Phase 26.1)
+- AI juror responses come from clerk bot with generic "AI Juror" label — planned: persona names + juror bots (Phase 25.4)
 - No witness bots yet — planned: 2 interactive witness bots
 - No web frontend — planned: React/Vue UI consuming the FastAPI backend

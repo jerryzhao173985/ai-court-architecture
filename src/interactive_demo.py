@@ -13,6 +13,22 @@ async def run_interactive_experience():
     print("Welcome! You are about to serve as a juror in a British Crown Court")
     print("murder trial. This experience will take approximately 15 minutes.")
     print()
+    
+    # Select case
+    from case_manager import CaseManager
+    import random
+    
+    case_manager = CaseManager()
+    available_cases = case_manager.list_available_cases()
+    
+    if not available_cases:
+        print("❌ No cases available")
+        return
+    
+    case_id, case_title = random.choice(available_cases)
+    print(f"Case: {case_title}")
+    print()
+    
     input("Press Enter to begin...")
     print()
     
@@ -20,7 +36,7 @@ async def run_interactive_experience():
     orchestrator = ExperienceOrchestrator(
         session_id="interactive_session_001",
         user_id="interactive_user",
-        case_id="blackthorn-hall-001"
+        case_id=case_id
     )
     
     # Initialize experience

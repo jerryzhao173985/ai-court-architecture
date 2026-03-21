@@ -86,6 +86,31 @@ class RateLimiter:
             # Sleep OUTSIDE the lock, then loop to re-check
             await asyncio.sleep(wait_time)
     
+    def check_would_block(self, estimated_tokens: int = 1000) -> bool:
+        """
+        Check if acquire() would block without modifying state.
+        
+        Args:
+            estimated_tokens: Estimated token count for the request
+            
+        Returns:
+            True if rate limit would block, False otherwise
+        """
+        now = time.time()
+        cutoff = now - 60
+        
+        # Count recent requests (within last minute)
+        recent_requests = sum(1 for t in self.request_times if t >= cutoff)
+        if recent_requests >= self.max_requests_per_minute:
+            return True
+        
+        # Count recent tokens (within last minute)
+        recent_tokens = sum(count for timestamp, count in self.token_usage if timestamp >= cutoff)
+        if recent_tokens + estimated_tokens > self.max_tokens_per_minute:
+            return True
+        
+        return False
+    
     def record_actual_tokens(self, estimated_tokens: int, actual_tokens: int):
         """
         Update token usage with actual count.
