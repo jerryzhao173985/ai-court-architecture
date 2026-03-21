@@ -57,38 +57,47 @@ ExperienceOrchestrator
 ## Project Structure
 
 ```
-src/
-├── orchestrator.py         Main coordinator wiring all components
-├── state_machine.py        14-state FSM with transitions and timing
-├── models.py               Pydantic v2 models (CaseContent, Evidence, Characters)
-├── session.py              UserSession, SessionStore, ReasoningAssessment
-├── config.py               Environment-based config (LLM + Luffa + app settings)
-├── llm_service.py          Dual-provider LLM client (OpenAI / Anthropic)
-├── trial_orchestrator.py   5 trial agents with stage-specific system prompts
-├── jury_orchestrator.py    8-juror deliberation with persona-driven prompts
-├── reasoning_evaluator.py  Evidence tracking, regex fallacy detection, scoring
-├── evidence_board.py       Chronological timeline with filtering
-├── dual_reveal.py          Assembles verdict + truth + assessment + juror reveal
-├── trial_stages.py         Stage timing configuration and progress tracking
-├── luffa_client.py         Luffa Bot HTTP client (1s polling, send, buttons)
-├── luffa_bot_service.py    Bot runtime: command routing, deliberation, reveal
-├── luffa_integration.py    LuffaBot / SuperBox / LuffaChannel wrappers
-├── multi_bot_client.py     Per-agent Luffa bot client management
-├── multi_bot_service.py    Multi-bot orchestration for group chat
-├── complexity_analyzer.py  Case complexity scoring for adaptive prompts
-├── error_handling.py       Fallback responses, auto-save, recovery
-├── api.py                  FastAPI REST endpoints + WebSocket
-├── interactive_demo.py     Terminal-based interactive experience
-└── main.py                 Basic automated demo
+src/                             Core source code
+├── orchestrator.py              Main coordinator wiring all components
+├── state_machine.py             14-state FSM with transitions and timing
+├── multi_bot_service.py         Multi-bot Luffa service (main entry point)
+├── multi_bot_client_sdk.py      Luffa Bot HTTP client (direct API, multi-bot, auth verification)
+├── config.py                    Environment-based config (LLM + Luffa + app settings)
+├── trial_orchestrator.py        5 trial agents with stage-specific system prompts
+├── jury_orchestrator.py         8-juror deliberation with persona-driven prompts
+├── models.py                    Pydantic v2 models (CaseContent, Evidence, Characters)
+├── evidence_board.py            Chronological timeline with filtering
+├── reasoning_evaluator.py       Evidence tracking, regex fallacy detection, scoring
+├── dual_reveal.py               Assembles verdict + truth + assessment + juror reveal
+├── llm_service.py               Dual-provider LLM client (OpenAI / Anthropic)
+├── session.py                   UserSession, SessionStore, ReasoningAssessment
+├── luffa_client.py              Single-bot Luffa HTTP client (legacy)
+├── multi_bot_client.py          Per-agent Luffa bot client (legacy)
+├── luffa_bot_service.py         Single-bot service runtime (legacy)
+├── luffa_integration.py         LuffaBot / SuperBox / LuffaChannel wrappers
+├── trial_stages.py              Stage timing configuration and progress tracking
+├── complexity_analyzer.py       Case complexity scoring for adaptive prompts
+├── error_handling.py            Fallback responses, auto-save, recovery
+├── api.py                       FastAPI REST endpoints + WebSocket
+├── interactive_demo.py          Terminal-based interactive experience
+└── main.py                      Basic automated demo
 
-fixtures/
-├── blackthorn-hall-001.json  Flagship case (murder mystery)
-└── sample_case.json          Minimal template for new cases
+fixtures/                        Case data
+├── blackthorn-hall-001.json     Flagship case (murder mystery, 7 evidence items)
+└── sample_case.json             Minimal template for new cases
 
-tests/unit/
-├── test_state_machine.py     12 tests — transitions, timing, persistence
-├── test_session.py           9 tests — serialization, expiry, cleanup
-└── test_integration.py       20 tests — all components end-to-end
+scripts/                         Utilities
+├── setup/                       Bot setup (add_bots_to_user, setup_bots, check_notifications)
+├── debug/                       API connection testing
+└── demo/                        Interactive demos (fact checker, trial simulation)
+
+tests/                           Test suites
+├── unit/                        Unit tests (state machine, session, fact checker)
+├── integration/                 Bot connectivity, courtroom group, deliberation tests
+└── analysis/                    Complexity analyzer and juror comparison analysis
+
+docs/                            Technical documentation
+└── LUFFA_INTEGRATION.md         Luffa Bot API reference and architecture
 ```
 
 ## Running Modes
@@ -117,34 +126,26 @@ Endpoints:
 
 API docs at `http://localhost:8000/docs`.
 
-**Luffa Group Chat Bot** — AI agents perform in a group chat:
-
-**NEW: Multi-Bot Architecture** — Each courtroom participant is a separate bot:
+**Luffa Group Chat Bot** — each courtroom agent is a separate bot in a Luffa group:
 ```bash
-# Configure 5 bots in .env (already done for you):
-# - Clerk Bot (ORQAZCejHdZELLD)
-# - Prosecution Bot (MZIXVYXwSwRx6Vd)
-# - Defence Bot (NGKIEJGGRlKKnAqC)
-# - Fact Checker Bot (GKUPDBfLv23WktAS)
-# - Judge Bot (YNLJHNCCsRmLBcvU)
-
-# Test configuration
-python test_multi_bot_config.py
-
-# Start multi-bot service
-./run_multi_bot.sh
+# 1. Configure 5 bot UIDs and secrets in .env (see .env.example)
+# 2. Create a Luffa group and add all 5 bots
+# 3. Start the service
+./run_courtroom.sh
 ```
 
-Add all 5 bots to a Luffa group, then in the group:
+Commands in the group chat:
 - `/start` — Begin trial
 - `/continue` — Advance stages (each bot speaks in turn)
+- `/evidence` — View evidence board (split by prosecution/defence)
 - `/vote guilty` or `/vote not_guilty` — Cast verdict
-- `/evidence` — View evidence board
 - `/status` — Check progress
+- `/stop` — End current trial
+- `/help` — Show commands
 
-Each agent is a distinct participant in the group. Prosecution Bot argues for guilty, Defence Bot creates doubt, Fact Checker Bot intervenes on contradictions, Judge Bot provides legal instructions. Much more immersive than single-bot mode.
+Prosecution Bot argues for guilt, Defence Bot creates doubt, Judge Bot provides legal instructions. The service polls all 5 bots, deduplicates messages, and filters bot echo to prevent loops.
 
-See `QUICKSTART.md` for detailed setup and `docs/multi-bot-architecture.md` for technical details.
+See `docs/LUFFA_INTEGRATION.md` for API reference and `QUICKSTART.md` for setup.
 
 ## Configuration
 
@@ -167,8 +168,9 @@ MAX_EXPERIENCE_MINUTES=20
 ## Tests
 
 ```bash
-pytest tests/ -v          # 41 unit tests, no API key needed
-python test_production.py # 4 production tests, requires OPENAI_API_KEY
+pytest tests/unit/ -v                    # Unit tests, no API key needed
+pytest tests/integration/ -v             # Integration tests, requires API keys
+./verify_system.sh                       # Full system verification
 ```
 
 ## Cost
@@ -192,17 +194,17 @@ Create a JSON file in `fixtures/` following the structure of `blackthorn-hall-00
 
 ## Status
 
-**Working:** 14-state trial flow, 5 AI agents with enhanced case-specific prompts, 8-juror deliberation with rich personas, dual-provider LLM (OpenAI + Anthropic), LLM-powered fact checking, complexity-adaptive prompts, reasoning evaluation, dual reveal, REST + WebSocket API, multi-bot Luffa integration (5 bots, one per agent), file-based session persistence, error handling with fallbacks.
+**Working:** 14-state trial flow, 5 AI agents with case-specific prompts, 8-juror deliberation with rich personas, dual-provider LLM (OpenAI + Anthropic), LLM-powered fact checking, complexity-adaptive prompts, reasoning evaluation, dual reveal, REST + WebSocket API, multi-bot Luffa integration (5 bots polling all queues with dedup and echo filtering), evidence board with prosecution/defence split, bot auth verification on startup, file-based session persistence, error handling with fallbacks.
 
-**Planned:** Auto-advance with pause control, LLM-powered AI voting (currently heuristic), web frontend, more cases, property-based tests.
+**Planned:** Separate AI juror bots (one per persona), Witness bots, LLM-powered AI voting (currently heuristic), more cases, web frontend.
 
 ## Documentation
 
-Detailed guides live in [`docs/`](docs/):
+Detailed guides in [`docs/`](docs/):
 
-- **[setup.md](docs/setup.md)** — Installation, configuration, troubleshooting
+- **[LUFFA_INTEGRATION.md](docs/LUFFA_INTEGRATION.md)** — Luffa Bot API reference, architecture, bugs fixed
 - **[architecture.md](docs/architecture.md)** — Core system components and implementation
 - **[multi-bot-architecture.md](docs/multi-bot-architecture.md)** — Multi-bot design: one bot per agent
+- **[setup.md](docs/setup.md)** — Installation, configuration, troubleshooting
 - **[luffa-guide.md](docs/luffa-guide.md)** — Bot setup, commands, user experience
-- **[deployment.md](docs/deployment.md)** — Deployment guide and launch checklist
 - **[roadmap.md](docs/roadmap.md)** — Planned refinements and future work
