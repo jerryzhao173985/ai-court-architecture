@@ -2,10 +2,14 @@
 
 from datetime import datetime
 from typing import Optional, Literal
+import logging
 from pydantic import BaseModel, Field, ConfigDict
 
 from models import CaseContent, EvidenceItem
 from state_machine import ExperienceState
+from llm_service import LLMService
+
+logger = logging.getLogger("veritas")
 
 
 class TrialAgent(BaseModel):
@@ -45,12 +49,17 @@ class TrialOrchestrator:
     fallback responses for agent failures.
     """
 
-    def __init__(self):
-        """Initialize trial orchestrator."""
+    def __init__(self, llm_service: Optional[LLMService] = None):
+        """Initialize trial orchestrator.
+        
+        Args:
+            llm_service: LLM service for generating agent responses (optional for testing)
+        """
         self.agents: dict[str, TrialAgent] = {}
         self.case_content: Optional[CaseContent] = None
         self.fact_check_count = 0
         self.max_fact_checks = 3
+        self.llm_service = llm_service
 
     def initialize_agents(self, case_content: CaseContent) -> None:
         """
@@ -227,7 +236,7 @@ Be authoritative, fair, and clear in your instructions."""
 
     async def _generate_agent_response(self, agent_role: str, stage: ExperienceState) -> AgentResponse:
         """
-        Generate response from an agent (placeholder for LLM integration).
+        Generate response from an agent using LLM.
         
         Args:
             agent_role: The role of the agent
@@ -240,16 +249,74 @@ Be authoritative, fair, and clear in your instructions."""
         if not agent:
             return self.handle_agent_failure(agent_role, stage)
         
-        # TODO: Replace with actual LLM API call
-        # For now, return placeholder response
-        content = self._get_fallback_response(agent_role, stage)
+        # Generate user prompt based on stage
+        user_prompt = self._get_stage_prompt(agent_role, stage)
+        fallback = self._get_fallback_response(agent_role, stage)
         
-        return AgentResponse(
-            agent_role=agent_role,
-            content=content,
-            timestamp=datetime.now(),
-            metadata={"stage": stage.value}
-        )
+        # Use LLM service if available, otherwise use fallback
+        if self.llm_service:
+            try:
+                content, used_fallback = await self.llm_service.generate_with_fallback(
+                    system_prompt=agent.system_prompt,
+                    user_prompt=user_prompt,
+                    fallback_text=fallback,
+                    max_tokens=agent.character_limit,
+                    timeout=agent.response_timeout // 1000  # Convert ms to seconds
+                )
+                
+                return AgentResponse(
+                    agent_role=agent_role,
+                    content=content,
+                    timestamp=datetime.now(),
+                    metadata={"stage": stage.value, "used_fallback": used_fallback}
+                )
+            except Exception as e:
+                logger.error(f"Agent response generation failed: {e}")
+                return self.handle_agent_failure(agent_role, stage)
+        else:
+            # No LLM service, use fallback
+            return AgentResponse(
+                agent_role=agent_role,
+                content=fallback,
+                timestamp=datetime.now(),
+                metadata={"stage": stage.value, "fallback": True}
+            )
+    
+    def _get_stage_prompt(self, agent_role: str, stage: ExperienceState) -> str:
+        """Get user prompt for agent based on stage."""
+        prompts = {
+            ("clerk", ExperienceState.CHARGE_READING): 
+                "Read the formal charge to the court.",
+            
+            ("prosecution", ExperienceState.PROSECUTION_OPENING):
+                "Deliver your opening statement to the jury. Outline the case you will prove.",
+            
+            ("defence", ExperienceState.DEFENCE_OPENING):
+                "Deliver your opening statement to the jury. Outline your defence strategy.",
+            
+            ("prosecution", ExperienceState.EVIDENCE_PRESENTATION):
+                "Present the key evidence that supports the prosecution's case.",
+            
+            ("defence", ExperienceState.EVIDENCE_PRESENTATION):
+                "Present evidence and arguments that support the defence.",
+            
+            ("prosecution", ExperienceState.CROSS_EXAMINATION):
+                "Cross-examine the defence's evidence and witnesses.",
+            
+            ("defence", ExperienceState.CROSS_EXAMINATION):
+                "Cross-examine the prosecution's evidence and witnesses.",
+            
+            ("prosecution", ExperienceState.PROSECUTION_CLOSING):
+                "Deliver your closing speech. Summarize why the jury should find the defendant guilty.",
+            
+            ("defence", ExperienceState.DEFENCE_CLOSING):
+                "Deliver your closing speech. Summarize why the jury should find the defendant not guilty.",
+            
+            ("judge", ExperienceState.JUDGE_SUMMING_UP):
+                "Sum up the case for the jury. Summarize evidence from both sides fairly and provide legal instructions on burden of proof and reasonable doubt. Do not express an opinion on the verdict."
+        }
+        
+        return prompts.get((agent_role, stage), f"Provide your statement for {stage.value}.")
 
     async def _generate_judge_summary(self) -> AgentResponse:
         """Generate judge's summing up."""

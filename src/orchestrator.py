@@ -3,6 +3,7 @@
 from datetime import datetime
 from typing import Optional, Literal
 import asyncio
+import logging
 
 from models import CaseContent
 from session import UserSession, SessionStore, DeliberationTurn
@@ -16,6 +17,11 @@ from dual_reveal import DualRevealAssembler, DualReveal
 from trial_stages import TrialStageManager
 from luffa_integration import LuffaBot, SuperBox, LuffaChannel
 from error_handling import ErrorHandler, StatePreservation
+from llm_service import LLMService
+from luffa_client import LuffaAPIClient
+from config import AppConfig, load_config
+
+logger = logging.getLogger("veritas")
 
 
 class ExperienceOrchestrator:
@@ -27,7 +33,7 @@ class ExperienceOrchestrator:
     integrations.
     """
 
-    def __init__(self, session_id: str, user_id: str, case_id: str):
+    def __init__(self, session_id: str, user_id: str, case_id: str, config: Optional[AppConfig] = None):
         """
         Initialize experience orchestrator.
         
@@ -35,10 +41,22 @@ class ExperienceOrchestrator:
             session_id: Unique session identifier
             user_id: User identifier
             case_id: Case identifier
+            config: Application configuration (loads from env if None)
         """
         self.session_id = session_id
         self.user_id = user_id
         self.case_id = case_id
+        
+        # Load configuration
+        try:
+            self.config = config or load_config()
+            self.llm_service = LLMService(self.config.llm)
+            self.luffa_client = LuffaAPIClient(self.config.luffa)
+        except Exception as e:
+            logger.warning(f"Failed to load config, using test mode: {e}")
+            self.config = None
+            self.llm_service = None
+            self.luffa_client = None
         
         # Initialize components (use fixtures path relative to project root)
         self.case_manager = CaseManager(cases_directory="fixtures")
@@ -92,16 +110,16 @@ class ExperienceOrchestrator:
             
             # Initialize all components
             self.evidence_board = EvidenceBoard(self.case_content)
-            self.trial_orchestrator = TrialOrchestrator()
+            self.trial_orchestrator = TrialOrchestrator(llm_service=self.llm_service)
             self.trial_orchestrator.initialize_agents(self.case_content)
-            self.jury_orchestrator = JuryOrchestrator()
+            self.jury_orchestrator = JuryOrchestrator(llm_service=self.llm_service)
             self.jury_orchestrator.initialize_jury(self.case_content)
             self.reasoning_evaluator = ReasoningEvaluator(self.case_content)
             self.dual_reveal_assembler = DualRevealAssembler(self.case_content)
             self.trial_stage_manager = TrialStageManager(self.case_content)
-            self.luffa_bot = LuffaBot(self.case_content)
-            self.superbox = SuperBox(self.case_content)
-            self.luffa_channel = LuffaChannel()
+            self.luffa_bot = LuffaBot(self.case_content, api_client=self.luffa_client)
+            self.superbox = SuperBox(self.case_content, api_client=self.luffa_client)
+            self.luffa_channel = LuffaChannel(api_client=self.luffa_client)
             self.state_preservation = StatePreservation(self.session_store)
             
             # Get greeting from Luffa Bot
@@ -352,14 +370,14 @@ class ExperienceOrchestrator:
             # Share verdict if opted in
             verdict_share = None
             if share_verdict and self.user_session.progress.vote:
-                verdict_share = self.luffa_channel.share_verdict(
+                verdict_share = await self.luffa_channel.share_verdict(
                     self.case_id,
                     self.user_session.progress.vote,
                     user_opted_in=True
                 )
             
             # Get aggregate statistics
-            statistics = self.luffa_channel.get_aggregate_statistics(self.case_id)
+            statistics = await self.luffa_channel.get_aggregate_statistics(self.case_id)
             
             # Save final progress
             self._save_progress()

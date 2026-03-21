@@ -1,10 +1,10 @@
 {
-  "sessionId": "demo_session_001",
-  "userId": "demo_user",
+  "sessionId": "test_001",
+  "userId": "test_user",
   "caseId": "blackthorn-hall-001",
-  "currentState": "judge_summing_up",
-  "startTime": "2026-03-21T02:36:20.336760",
-  "lastActivityTime": "2026-03-21T02:36:20.336765",
+  "currentState": "hook_scene",
+  "startTime": "2026-03-21T02:36:06.841801",
+  "lastActivityTime": "2026-03-21T02:36:06.841806",
   "stateHistory": [],
   "progress": {
     "completedStages": [],

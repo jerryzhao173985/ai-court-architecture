@@ -2,10 +2,14 @@
 
 from datetime import datetime
 from typing import Optional, Literal
+import logging
 from pydantic import BaseModel, Field, ConfigDict
 
 from models import CaseContent
 from session import DeliberationTurn
+from llm_service import LLMService
+
+logger = logging.getLogger("veritas")
 
 
 class JurorPersona(BaseModel):
@@ -76,14 +80,19 @@ class JuryOrchestrator:
     and reveals juror identities.
     """
 
-    def __init__(self):
-        """Initialize jury orchestrator."""
+    def __init__(self, llm_service: Optional[LLMService] = None):
+        """Initialize jury orchestrator.
+        
+        Args:
+            llm_service: LLM service for generating juror responses (optional for testing)
+        """
         self.jurors: list[JurorPersona] = []
         self.case_content: Optional[CaseContent] = None
         self.deliberation_start_time: Optional[datetime] = None
         self.deliberation_statements: list[DeliberationTurn] = []
         self.max_deliberation_seconds = 360  # 6 minutes hard limit
         self.min_deliberation_seconds = 240  # 4 minutes minimum
+        self.llm_service = llm_service
 
     def initialize_jury(self, case_content: CaseContent) -> None:
         """
@@ -241,7 +250,7 @@ You contribute brief, thoughtful statements during deliberation. You listen to o
 
     async def _generate_juror_response(self, juror: JurorPersona, context: str) -> DeliberationTurn:
         """
-        Generate response from an AI juror.
+        Generate response from an AI juror using LLM.
         
         Args:
             juror: The juror persona
@@ -250,17 +259,54 @@ You contribute brief, thoughtful statements during deliberation. You listen to o
         Returns:
             Deliberation turn with juror's response
         """
-        # TODO: Replace with actual LLM API call
-        # For now, return placeholder based on persona
+        # Build conversation context
+        recent_statements = "\n".join([
+            f"{turn.juror_id}: {turn.statement}"
+            for turn in self.deliberation_statements[-5:]  # Last 5 statements
+        ])
         
+        user_prompt = f"""The jury is deliberating. Recent discussion:
+
+{recent_statements}
+
+Latest statement: {context}
+
+Respond to this statement as part of the deliberation. Keep your response under 200 words."""
+        
+        # Generate fallback based on persona
         if juror.persona == "evidence_purist":
-            content = "I need to see concrete evidence. What specific facts support that conclusion?"
+            fallback = "I need to see concrete evidence. What specific facts support that conclusion?"
         elif juror.persona == "sympathetic_doubter":
-            content = "But can we really be certain beyond reasonable doubt? There could be other explanations."
+            fallback = "But can we really be certain beyond reasonable doubt? There could be other explanations."
         elif juror.persona == "moral_absolutist":
-            content = "We must consider the gravity of this crime and ensure justice is served."
+            fallback = "We must consider the gravity of this crime and ensure justice is served."
         else:
-            content = "I see both sides of this argument."
+            fallback = "I see both sides of this argument."
+        
+        # Use LLM service if available
+        if self.llm_service and juror.system_prompt:
+            try:
+                # Use GPT-4o for active AI jurors, GPT-4o-mini for lightweight
+                model_override = None
+                if self.llm_service.provider == "openai":
+                    if juror.type == "active_ai":
+                        model_override = "gpt-4o"
+                    else:  # lightweight_ai
+                        model_override = "gpt-4o-mini"
+                
+                content, used_fallback = await self.llm_service.generate_with_fallback(
+                    system_prompt=juror.system_prompt,
+                    user_prompt=user_prompt,
+                    fallback_text=fallback,
+                    max_tokens=200 if juror.type == "active_ai" else 100,
+                    timeout=15,  # 15 second limit
+                    model_override=model_override
+                )
+            except Exception as e:
+                logger.warning(f"Juror response generation failed: {e}")
+                content = fallback
+        else:
+            content = fallback
         
         return DeliberationTurn(
             juror_id=juror.id,
@@ -329,8 +375,16 @@ You contribute brief, thoughtful statements during deliberation. You listen to o
         return self.calculate_verdict(votes)
 
     def _generate_ai_vote(self, juror: JurorPersona) -> Literal["guilty", "not_guilty"]:
-        """Generate vote for AI juror (placeholder)."""
-        # TODO: Replace with actual LLM-based decision
+        """
+        Generate vote for AI juror based on their deliberation.
+        
+        For now uses heuristic based on persona. In production, this would
+        use LLM to analyze the juror's statements and case evidence.
+        """
+        # TODO: Replace with LLM-based decision making
+        # Could analyze juror's own statements during deliberation
+        # and ask them to vote based on their reasoning
+        
         if juror.persona == "sympathetic_doubter":
             return "not_guilty"
         elif juror.persona == "moral_absolutist":

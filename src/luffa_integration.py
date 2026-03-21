@@ -2,10 +2,14 @@
 
 from datetime import datetime
 from typing import Optional, Literal
+import logging
 from pydantic import BaseModel, Field, ConfigDict
 
 from state_machine import ExperienceState
 from models import CaseContent
+from luffa_client import LuffaAPIClient
+
+logger = logging.getLogger("veritas")
 
 
 # ============================================================================
@@ -29,14 +33,16 @@ class LuffaBot:
     and procedural guidance.
     """
 
-    def __init__(self, case_content: CaseContent):
+    def __init__(self, case_content: CaseContent, api_client: Optional[LuffaAPIClient] = None):
         """
         Initialize Luffa Bot.
         
         Args:
             case_content: The case content for context
+            api_client: Luffa API client for sending messages (optional for testing)
         """
         self.case_content = case_content
+        self.api_client = api_client
 
     def get_greeting(self) -> LuffaBotMessage:
         """
@@ -53,11 +59,38 @@ This experience will take approximately 15 minutes. Your reasoning will be evalu
 
 Are you ready to begin?"""
         
-        return LuffaBotMessage(
+        message = LuffaBotMessage(
             type="greeting",
             content=content,
             metadata={"case_id": self.case_content.case_id}
         )
+        
+        return message
+    
+    async def send_greeting(self, session_id: str) -> LuffaBotMessage:
+        """
+        Send greeting message via API.
+        
+        Args:
+            session_id: User session ID
+            
+        Returns:
+            Greeting message
+        """
+        message = self.get_greeting()
+        
+        if self.api_client:
+            try:
+                await self.api_client.send_bot_message(
+                    session_id=session_id,
+                    message_type=message.type,
+                    content=message.content,
+                    metadata=message.metadata
+                )
+            except Exception as e:
+                logger.warning(f"Failed to send greeting via API: {e}")
+        
+        return message
 
     def announce_stage(self, stage: ExperienceState) -> LuffaBotMessage:
         """
@@ -104,6 +137,32 @@ Are you ready to begin?"""
             content=content,
             metadata={"stage": stage.value}
         )
+    
+    async def send_stage_announcement(self, session_id: str, stage: ExperienceState) -> LuffaBotMessage:
+        """
+        Send stage announcement via API.
+        
+        Args:
+            session_id: User session ID
+            stage: The new stage
+            
+        Returns:
+            Stage announcement message
+        """
+        message = self.announce_stage(stage)
+        
+        if self.api_client:
+            try:
+                await self.api_client.send_bot_message(
+                    session_id=session_id,
+                    message_type=message.type,
+                    content=message.content,
+                    metadata=message.metadata
+                )
+            except Exception as e:
+                logger.warning(f"Failed to send stage announcement via API: {e}")
+        
+        return message
 
     def prompt_superbox_launch(self, stage: ExperienceState) -> LuffaBotMessage:
         """
@@ -194,15 +253,17 @@ class SuperBox:
     evidence boards, and trial participants.
     """
 
-    def __init__(self, case_content: CaseContent):
+    def __init__(self, case_content: CaseContent, api_client: Optional[LuffaAPIClient] = None):
         """
         Initialize SuperBox.
         
         Args:
             case_content: The case content for visual rendering
+            api_client: Luffa API client for rendering scenes (optional for testing)
         """
         self.case_content = case_content
         self.current_scene: Optional[SuperBoxScene] = None
+        self.api_client = api_client
 
     def render_courtroom_scene(self, active_agent: Optional[str] = None) -> SuperBoxScene:
         """
@@ -244,6 +305,32 @@ class SuperBox:
         )
         
         self.current_scene = scene
+        return scene
+    
+    async def render_courtroom_scene_async(self, session_id: str, active_agent: Optional[str] = None) -> SuperBoxScene:
+        """
+        Render courtroom scene and send to API.
+        
+        Args:
+            session_id: User session ID
+            active_agent: Currently speaking agent
+            
+        Returns:
+            Courtroom scene configuration
+        """
+        scene = self.render_courtroom_scene(active_agent)
+        
+        if self.api_client:
+            try:
+                await self.api_client.render_superbox_scene(
+                    session_id=session_id,
+                    scene_type=scene.scene_type,
+                    elements=[e.model_dump(by_alias=True) for e in scene.elements],
+                    active_agent=active_agent
+                )
+            except Exception as e:
+                logger.warning(f"Failed to render courtroom scene via API: {e}")
+        
         return scene
 
     def render_evidence_board(self, highlighted_item_id: Optional[str] = None) -> SuperBoxScene:
@@ -404,9 +491,14 @@ class LuffaChannel:
     Handles new case announcements, verdict sharing, and aggregate statistics.
     """
 
-    def __init__(self):
-        """Initialize Luffa Channel."""
+    def __init__(self, api_client: Optional[LuffaAPIClient] = None):
+        """Initialize Luffa Channel.
+        
+        Args:
+            api_client: Luffa API client for channel operations (optional for testing)
+        """
         self.verdict_shares: list[VerdictShare] = []
+        self.api_client = api_client
 
     def announce_new_case(self, case_content: CaseContent) -> ChannelAnnouncement:
         """
@@ -446,7 +538,7 @@ class LuffaChannel:
             "note": "Your reasoning assessment will remain private."
         }
 
-    def share_verdict(self, case_id: str, verdict: Literal["guilty", "not_guilty"], 
+    async def share_verdict(self, case_id: str, verdict: Literal["guilty", "not_guilty"], 
                      user_opted_in: bool) -> Optional[VerdictShare]:
         """
         Share verdict to channel if user opted in.
@@ -470,9 +562,21 @@ class LuffaChannel:
         )
         
         self.verdict_shares.append(share)
+        
+        # Send to API if available
+        if self.api_client:
+            try:
+                await self.api_client.share_verdict(
+                    case_id=case_id,
+                    verdict=verdict,
+                    anonymous=True
+                )
+            except Exception as e:
+                logger.warning(f"Failed to share verdict via API: {e}")
+        
         return share
 
-    def get_aggregate_statistics(self, case_id: str) -> dict:
+    async def get_aggregate_statistics(self, case_id: str) -> dict:
         """
         Get aggregate verdict statistics for a case.
         
@@ -482,6 +586,14 @@ class LuffaChannel:
         Returns:
             Statistics dictionary
         """
+        # Try to get from API first
+        if self.api_client:
+            try:
+                return await self.api_client.get_verdict_statistics(case_id)
+            except Exception as e:
+                logger.warning(f"Failed to get statistics from API: {e}")
+        
+        # Fallback to local statistics
         case_shares = [s for s in self.verdict_shares if s.case_id == case_id]
         
         if not case_shares:
