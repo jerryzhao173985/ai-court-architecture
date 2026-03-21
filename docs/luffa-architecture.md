@@ -222,7 +222,7 @@ Load case: blackthorn-hall-001.json
   ↓
 Initialize 5 trial agents
   ↓
-Initialize 7 AI jurors + 1 human
+Initialize 8 jurors (3 active AI + 4 lightweight AI + 1 human)
   ↓
 Send greeting
   ↓

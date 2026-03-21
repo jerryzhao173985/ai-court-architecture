@@ -330,8 +330,8 @@ Transform the functional bot into a polished, immersive group chat courtroom exp
 ## 📝 Documentation Updates Needed
 
 After refinements:
-1. Update LUFFA_SETUP.md with new features
-2. Update LUFFA_EXPERIENCE.md with character names
+1. Update `docs/luffa-guide.md` with new features
+2. Update `docs/luffa-guide.md` with character names
 3. Update commands in all docs
 4. Add multi-user guide
 5. Create troubleshooting guide

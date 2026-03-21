@@ -2,12 +2,14 @@
 
 from datetime import datetime
 from typing import Optional, Literal
+import hashlib
 import logging
 from pydantic import BaseModel, Field, ConfigDict
 
 from models import CaseContent
 from session import DeliberationTurn
 from llm_service import LLMService
+from complexity_analyzer import CaseComplexityAnalyzer, ComplexityLevel
 
 logger = logging.getLogger("veritas")
 
@@ -93,6 +95,8 @@ class JuryOrchestrator:
         self.max_deliberation_seconds = 360  # 6 minutes hard limit
         self.min_deliberation_seconds = 240  # 4 minutes minimum
         self.llm_service = llm_service
+        self.complexity_analyzer = CaseComplexityAnalyzer()
+        self.complexity_level: Optional[ComplexityLevel] = None
 
     def initialize_jury(self, case_content: CaseContent) -> None:
         """
@@ -103,6 +107,10 @@ class JuryOrchestrator:
         """
         self.case_content = case_content
         self.jurors = []
+        
+        # Analyze case complexity
+        self.complexity_level = self.complexity_analyzer.analyze_complexity(case_content)
+        logger.info(f"Case complexity for jury: {self.complexity_level.level}")
         
         # Create 3 active AI jurors with distinct personas
         self.jurors.append(JurorPersona(
@@ -145,48 +153,157 @@ class JuryOrchestrator:
 
     def _get_evidence_purist_prompt(self, case_content: CaseContent) -> str:
         """Generate prompt for Evidence Purist persona."""
+        # Get complexity guidance
+        complexity_guidance = ""
+        if self.complexity_level:
+            complexity_guidance = self.complexity_analyzer.get_complexity_guidance(self.complexity_level)
+        
+        # Adjust response length based on complexity
+        max_words = 200
+        if self.complexity_level:
+            if self.complexity_level.level == "simple":
+                max_words = 150
+            elif self.complexity_level.level == "complex":
+                max_words = 250
+        
         return f"""You are Juror 1, an Evidence Purist in a murder trial.
 
 Case: {case_content.title}
 
-Your reasoning style:
-- You rely strictly on physical evidence and documented facts
-- You are skeptical of emotional arguments or speculation
-- You demand concrete proof for every claim
-- You frequently reference specific evidence items
-- You are analytical and methodical
+PERSONALITY & BACKGROUND:
+You are a retired forensic accountant with 30 years of experience analyzing documents and data. You have a scientific mindset and believe that truth emerges from facts, not feelings. You're respected but can come across as cold or dismissive of emotional appeals. You take notes meticulously during trial.
 
-Engage in deliberation by questioning weak arguments and demanding evidence. Keep responses under 200 words."""
+CORE REASONING STYLE:
+- You rely EXCLUSIVELY on physical evidence, documents, and verifiable testimony
+- You are deeply skeptical of circumstantial evidence unless it forms a clear pattern
+- You demand concrete proof with clear chain of custody for every claim
+- You frequently cite specific evidence items by name/number
+- You are analytical, methodical, and sometimes pedantic about details
+- You distrust "gut feelings" and "common sense" arguments
+
+DELIBERATION BEHAVIORS:
+- You interrupt when others make unsupported claims: "Where's the evidence for that?"
+- You reference specific trial moments: "The prosecution said X, but the document showed Y"
+- You create mental timelines and check them against evidence
+- You're willing to change your mind, but ONLY when shown compelling physical evidence
+- You sometimes frustrate other jurors with your insistence on proof
+- You speak in measured, precise language with occasional technical terms
+
+INTERACTION PATTERNS:
+- You clash with the Moral Absolutist when they prioritize justice over evidence
+- You respect the Sympathetic Doubter's logical approach but push back on speculation
+- You ask pointed questions: "What physical evidence supports that theory?"
+- You summarize evidence lists to ground the discussion
+- You become more forceful when you sense the group drifting into emotion
+
+CASE-SPECIFIC FOCUS:
+{self._get_evidence_purist_case_focus(case_content)}
+{complexity_guidance}
+
+Keep responses under {max_words} words. Speak naturally as this character would - be direct, evidence-focused, and occasionally impatient with speculation."""
 
     def _get_sympathetic_doubter_prompt(self, case_content: CaseContent) -> str:
         """Generate prompt for Sympathetic Doubter persona."""
+        # Get complexity guidance
+        complexity_guidance = ""
+        if self.complexity_level:
+            complexity_guidance = self.complexity_analyzer.get_complexity_guidance(self.complexity_level)
+        
+        # Adjust response length based on complexity
+        max_words = 200
+        if self.complexity_level:
+            if self.complexity_level.level == "simple":
+                max_words = 150
+            elif self.complexity_level.level == "complex":
+                max_words = 250
+        
         return f"""You are Juror 2, a Sympathetic Doubter in a murder trial.
 
 Case: {case_content.title}
 
-Your reasoning style:
-- You are inclined to give the defendant the benefit of the doubt
-- You look for alternative explanations for evidence
-- You emphasize the "beyond reasonable doubt" standard
-- You are compassionate but not irrational
-- You question whether the prosecution has proven their case
+PERSONALITY & BACKGROUND:
+You are a social worker who has seen how the justice system can fail vulnerable people. You believe in the presumption of innocence deeply - not as a legal technicality, but as a moral imperative. You're empathetic and thoughtful, sometimes to a fault. You've served on a jury once before and voted not guilty despite group pressure.
 
-Engage in deliberation by raising doubts and alternative interpretations. Keep responses under 200 words."""
+CORE REASONING STYLE:
+- You are fundamentally inclined to give the defendant the benefit of the doubt
+- You actively search for alternative explanations that could exonerate
+- You emphasize "beyond reasonable doubt" as a HIGH bar, not just "probably guilty"
+- You are compassionate but not irrational - you need logical alternatives, not just hope
+- You question whether the prosecution has truly PROVEN their case or just suggested it
+- You're sensitive to circumstantial evidence being presented as conclusive
+
+DELIBERATION BEHAVIORS:
+- You often start with: "But what if..." or "Couldn't it also mean..."
+- You reframe prosecution evidence: "That shows X, but it doesn't prove Y"
+- You remind others of the burden of proof when they seem too certain
+- You speak gently but persistently, not backing down easily
+- You sometimes play devil's advocate even when you're leaning guilty
+- You ask "what are we missing?" to highlight gaps in the prosecution's case
+
+INTERACTION PATTERNS:
+- You align with the Evidence Purist on demanding proof, but differ on what constitutes doubt
+- You clash with the Moral Absolutist when they prioritize punishment over proof
+- You validate others' concerns while introducing alternative perspectives
+- You use phrases like: "I understand, but..." or "That's fair, however..."
+- You become more vocal when you sense the group rushing to judgment
+
+CASE-SPECIFIC FOCUS:
+{self._get_sympathetic_doubter_case_focus(case_content)}
+{complexity_guidance}
+
+Keep responses under {max_words} words. Speak naturally as this character would - be thoughtful, questioning, and gently persistent in raising doubts."""
 
     def _get_moral_absolutist_prompt(self, case_content: CaseContent) -> str:
         """Generate prompt for Moral Absolutist persona."""
+        # Get complexity guidance
+        complexity_guidance = ""
+        if self.complexity_level:
+            complexity_guidance = self.complexity_analyzer.get_complexity_guidance(self.complexity_level)
+        
+        # Adjust response length based on complexity
+        max_words = 200
+        if self.complexity_level:
+            if self.complexity_level.level == "simple":
+                max_words = 150
+            elif self.complexity_level.level == "complex":
+                max_words = 250
+        
         return f"""You are Juror 3, a Moral Absolutist in a murder trial.
 
 Case: {case_content.title}
 
-Your reasoning style:
-- You focus on right and wrong, justice and accountability
-- You believe wrongdoers must face consequences
-- You are less concerned with technicalities than with moral truth
-- You are passionate about justice
-- You may be swayed by the severity of the crime
+PERSONALITY & BACKGROUND:
+You are a former military officer who believes strongly in accountability and consequences. You've seen what happens when wrongdoers escape justice. You're passionate, principled, and sometimes see issues in black and white. You believe the justice system exists to protect society and punish the guilty. You have strong moral convictions and aren't afraid to express them.
 
-Engage in deliberation by emphasizing moral responsibility and justice. Keep responses under 200 words."""
+CORE REASONING STYLE:
+- You focus on right and wrong, justice and accountability above all else
+- You believe that when someone commits murder, they MUST face consequences
+- You are less concerned with legal technicalities than with moral truth and justice
+- You are passionate about ensuring victims receive justice
+- You may be swayed by the severity and brutality of the crime itself
+- You trust your moral intuition about guilt and character
+
+DELIBERATION BEHAVIORS:
+- You speak with conviction: "This is about justice" or "We owe it to the victim"
+- You emphasize the human cost: "Someone died. Someone's family is grieving."
+- You challenge others who seem to be "letting the defendant off on technicalities"
+- You sometimes appeal to common sense: "We all know what happened here"
+- You can be forceful and passionate, occasionally dominating the conversation
+- You frame the decision as a moral duty, not just a legal determination
+
+INTERACTION PATTERNS:
+- You clash with the Sympathetic Doubter, seeing them as too soft or naive
+- You get frustrated with the Evidence Purist's focus on technicalities over justice
+- You use rhetorical questions: "Are we really going to let them walk free?"
+- You invoke the victim's memory and the defendant's character
+- You become more emotional and emphatic when others express doubt
+- You sometimes need to be reminded to let others speak
+
+CASE-SPECIFIC FOCUS:
+{self._get_moral_absolutist_case_focus(case_content)}
+{complexity_guidance}
+
+Keep responses under {max_words} words. Speak naturally as this character would - be passionate, direct, and morally certain, but not unreasonable."""
 
     def _get_lightweight_prompt(self, case_content: CaseContent, juror_num: int) -> str:
         """Generate prompt for lightweight AI juror."""
@@ -195,6 +312,87 @@ Engage in deliberation by emphasizing moral responsibility and justice. Keep res
 Case: {case_content.title}
 
 You contribute brief, thoughtful statements during deliberation. You listen to other jurors and occasionally share your perspective. Keep responses under 100 words and speak infrequently."""
+
+    def _get_evidence_purist_case_focus(self, case_content: CaseContent) -> str:
+        """Generate case-specific focus for Evidence Purist."""
+        # Analyze evidence to identify what the purist would focus on
+        evidence_items = case_content.evidence
+        
+        focus_points = []
+        
+        # Look for physical evidence
+        physical_evidence = [e for e in evidence_items if e.type == "physical"]
+        if physical_evidence:
+            focus_points.append(f"You're particularly interested in the physical evidence: {', '.join([e.title for e in physical_evidence[:3]])}")
+        
+        # Look for documentary evidence
+        documentary_evidence = [e for e in evidence_items if e.type == "documentary"]
+        if documentary_evidence:
+            focus_points.append(f"You scrutinize the documentary evidence: {', '.join([e.title for e in documentary_evidence[:2]])}")
+        
+        # Look for timeline issues
+        if len(evidence_items) >= 3:
+            focus_points.append("You're building a timeline from the evidence to check for consistency")
+        
+        # Default focus
+        if not focus_points:
+            focus_points.append("You're analyzing all evidence items for consistency and gaps")
+        
+        # Add general guidance
+        focus_points.append("You want to see clear, unbroken chains of evidence, not assumptions")
+        
+        return "\n- ".join([""] + focus_points)
+
+    def _get_sympathetic_doubter_case_focus(self, case_content: CaseContent) -> str:
+        """Generate case-specific focus for Sympathetic Doubter."""
+        evidence_items = case_content.evidence
+        
+        focus_points = []
+        
+        # Look for gaps in evidence
+        if len(evidence_items) < 7:
+            focus_points.append("You notice what's MISSING - no murder weapon, no eyewitness, no confession")
+        
+        # Look for testimonial evidence (which can be unreliable)
+        testimonial_evidence = [e for e in evidence_items if e.type == "testimonial"]
+        if testimonial_evidence:
+            focus_points.append(f"You question the reliability of testimonial evidence: {', '.join([e.title for e in testimonial_evidence[:2]])}")
+        
+        # Look for timing issues
+        focus_points.append("You're looking for timeline inconsistencies that create reasonable doubt")
+        
+        # Look for alternative explanations
+        focus_points.append("You're actively considering: Could someone else have done this? Could this be accidental?")
+        
+        # Add burden of proof reminder
+        focus_points.append("You keep asking: Has the prosecution PROVEN guilt beyond reasonable doubt, or just suggested it?")
+        
+        return "\n- ".join([""] + focus_points)
+
+    def _get_moral_absolutist_case_focus(self, case_content: CaseContent) -> str:
+        """Generate case-specific focus for Moral Absolutist."""
+        focus_points = []
+        
+        # Focus on the victim
+        if case_content.narrative and case_content.narrative.victim_profile:
+            victim_name = case_content.narrative.victim_profile.name
+            focus_points.append(f"You keep thinking about {victim_name} and their family - they deserve justice")
+        
+        # Focus on the defendant's character and motive
+        if case_content.narrative and case_content.narrative.defendant_profile:
+            defendant_name = case_content.narrative.defendant_profile.name
+            focus_points.append(f"You believe {defendant_name}'s motive and opportunity show their guilt")
+        
+        # Focus on the severity of murder
+        focus_points.append("You emphasize that murder is the ultimate crime - we can't let someone walk free on technicalities")
+        
+        # Focus on moral certainty
+        focus_points.append("You trust your moral intuition: the evidence points to guilt, and justice demands accountability")
+        
+        # Focus on societal protection
+        focus_points.append("You believe the jury's duty is to protect society by holding the guilty accountable")
+        
+        return "\n- ".join([""] + focus_points)
 
     def start_deliberation(self) -> str:
         """
@@ -391,7 +589,8 @@ Respond to this statement as part of the deliberation. Keep your response under 
             return "guilty"
         else:
             # Evidence purist and lightweight: balanced
-            return "guilty" if hash(juror.id) % 2 == 0 else "not_guilty"
+            digest = int(hashlib.md5(juror.id.encode()).hexdigest(), 16)
+            return "guilty" if digest % 2 == 0 else "not_guilty"
 
     def calculate_verdict(self, votes: list[JurorVote]) -> VoteResult:
         """

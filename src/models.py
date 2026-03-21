@@ -2,22 +2,23 @@
 
 from datetime import datetime
 from typing import Literal, Optional
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, ConfigDict
 
 
 class CharacterProfile(BaseModel):
     """Profile for a character in the case (victim, defendant, witness)."""
+    model_config = ConfigDict(populate_by_name=True)
+    
     name: str
     role: str
     background: str
     relevant_facts: list[str] = Field(alias="relevantFacts")
 
-    class Config:
-        populate_by_name = True
-
 
 class EvidenceItem(BaseModel):
     """Individual piece of case evidence."""
+    model_config = ConfigDict(populate_by_name=True)
+    
     id: str
     type: Literal["physical", "testimonial", "documentary"]
     title: str
@@ -26,54 +27,49 @@ class EvidenceItem(BaseModel):
     presented_by: Literal["prosecution", "defence"] = Field(alias="presentedBy")
     significance: str
 
-    class Config:
-        populate_by_name = True
-
 
 class TimelineEvent(BaseModel):
     """Event on the case timeline."""
+    model_config = ConfigDict(populate_by_name=True)
+    
     timestamp: str  # ISO 8601 format
     description: str
     evidence_ids: list[str] = Field(alias="evidenceIds")
 
-    class Config:
-        populate_by_name = True
-
 
 class ReasoningCriteria(BaseModel):
     """Criteria for evaluating reasoning quality."""
+    model_config = ConfigDict(populate_by_name=True)
+    
     required_evidence_references: list[str] = Field(alias="requiredEvidenceReferences")
     logical_fallacies: list[str] = Field(alias="logicalFallacies")
     coherence_threshold: float = Field(alias="coherenceThreshold")
 
-    class Config:
-        populate_by_name = True
-
 
 class GroundTruth(BaseModel):
     """Ground truth information for case evaluation."""
+    model_config = ConfigDict(populate_by_name=True)
+    
     actual_verdict: Literal["guilty", "not_guilty"] = Field(alias="actualVerdict")
     key_facts: list[str] = Field(alias="keyFacts")
     reasoning_criteria: ReasoningCriteria = Field(alias="reasoningCriteria")
 
-    class Config:
-        populate_by_name = True
-
 
 class CaseNarrative(BaseModel):
     """Narrative elements of the case."""
+    model_config = ConfigDict(populate_by_name=True)
+    
     hook_scene: str = Field(alias="hookScene")
     charge_text: str = Field(alias="chargeText")
     victim_profile: CharacterProfile = Field(alias="victimProfile")
     defendant_profile: CharacterProfile = Field(alias="defendantProfile")
     witness_profiles: list[CharacterProfile] = Field(alias="witnessProfiles")
 
-    class Config:
-        populate_by_name = True
-
 
 class CaseContent(BaseModel):
     """Complete case content structure."""
+    model_config = ConfigDict(populate_by_name=True)
+    
     case_id: str = Field(alias="caseId")
     title: str
     narrative: CaseNarrative
@@ -88,9 +84,6 @@ class CaseContent(BaseModel):
         if not (5 <= len(v) <= 7):
             raise ValueError(f"Evidence items must be between 5 and 7, got {len(v)}")
         return v
-
-    class Config:
-        populate_by_name = True
 
     def serialize(self) -> str:
         """Serialize case content to JSON string."""

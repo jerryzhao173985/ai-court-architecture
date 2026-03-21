@@ -1,4 +1,4 @@
-##!/bin/bash
+#!/bin/bash
 
 # VERITAS Interactive Experience
 # Play the courtroom experience yourself!
@@ -33,3 +33,4 @@ echo ""
 
 # Run the interactive demo
 cd src && ../venv/bin/python interactive_demo.py
+

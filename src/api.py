@@ -12,6 +12,8 @@ from models import CaseContent
 from session import UserSession, SessionProgress, SessionMetadata, DeliberationTurn
 from state_machine import ExperienceState, StateMachine
 from case_manager import CaseManager
+from orchestrator import ExperienceOrchestrator
+from config import load_config
 
 
 # ============================================================================
@@ -93,8 +95,8 @@ app = FastAPI(
 # Configure CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Configure appropriately for production
-    allow_credentials=True,
+    allow_origins=["*"],
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -120,38 +122,33 @@ async def create_session(request: CreateSessionRequest):
         Session creation response with session ID
     """
     try:
-        # Load case content
-        case_content = case_manager.load_case(request.case_id)
-        
-        # Generate session ID
         session_id = f"session_{request.user_id}_{datetime.now().timestamp()}"
-        
-        # Create user session
-        user_session = UserSession(
-            sessionId=session_id,
-            userId=request.user_id,
-            caseId=request.case_id,
-            currentState=ExperienceState.NOT_STARTED,
-            startTime=datetime.now(),
-            lastActivityTime=datetime.now(),
-            progress=SessionProgress(),
-            metadata=SessionMetadata()
+
+        # Create orchestrator (handles config loading internally)
+        orchestrator = ExperienceOrchestrator(
+            session_id=session_id,
+            user_id=request.user_id,
+            case_id=request.case_id
         )
-        
-        # Store session
+
+        # Initialize experience
+        result = await orchestrator.initialize()
+        if not result.get("success"):
+            raise HTTPException(status_code=500, detail=result.get("error", "Initialization failed"))
+
+        # Store session with orchestrator
         active_sessions[session_id] = {
-            "session": user_session,
-            "case_content": case_content,
+            "orchestrator": orchestrator,
             "websocket_clients": []
         }
-        
+
         return CreateSessionResponse(
             sessionId=session_id,
             caseId=request.case_id,
             currentState=ExperienceState.NOT_STARTED.value,
             message="Session created successfully"
         )
-    
+
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail=f"Case {request.case_id} not found")
     except Exception as e:
@@ -171,23 +168,19 @@ async def get_session(session_id: str):
     """
     if session_id not in active_sessions:
         raise HTTPException(status_code=404, detail="Session not found")
-    
+
     session_data = active_sessions[session_id]
-    user_session: UserSession = session_data["session"]
-    
-    # Calculate elapsed time
-    elapsed = (datetime.now() - user_session.start_time).total_seconds()
-    
+    orchestrator: ExperienceOrchestrator = session_data["orchestrator"]
+
+    elapsed = (datetime.now() - orchestrator.user_session.start_time).total_seconds()
+    progress = orchestrator.get_progress()
+
     return SessionStateResponse(
-        sessionId=user_session.session_id,
-        userId=user_session.user_id,
-        caseId=user_session.case_id,
-        currentState=user_session.current_state.value,
-        progress={
-            "completed_stages": [s.value for s in user_session.progress.completed_stages],
-            "deliberation_statements_count": len(user_session.progress.deliberation_statements),
-            "vote": user_session.progress.vote
-        },
+        sessionId=orchestrator.session_id,
+        userId=orchestrator.user_id,
+        caseId=orchestrator.case_id,
+        currentState=orchestrator.state_machine.current_state.value,
+        progress=progress,
         elapsedTimeSeconds=elapsed
     )
 
@@ -206,44 +199,36 @@ async def submit_statement(session_id: str, request: SubmitStatementRequest):
     """
     if session_id not in active_sessions:
         raise HTTPException(status_code=404, detail="Session not found")
-    
+
     session_data = active_sessions[session_id]
-    user_session: UserSession = session_data["session"]
-    
+    orchestrator: ExperienceOrchestrator = session_data["orchestrator"]
+
     # Verify in deliberation state
-    if user_session.current_state != ExperienceState.JURY_DELIBERATION:
+    if orchestrator.state_machine.current_state != ExperienceState.JURY_DELIBERATION:
         raise HTTPException(status_code=400, detail="Not in deliberation state")
-    
-    # Create user turn
-    user_turn = DeliberationTurn(
-        jurorId="juror_human",
-        statement=request.statement,
-        timestamp=datetime.now(),
-        evidenceReferences=request.evidence_references
+
+    # Submit through orchestrator
+    result = await orchestrator.submit_deliberation_statement(
+        request.statement,
+        request.evidence_references
     )
-    
-    # Store in session
-    user_session.progress.deliberation_statements.append(user_turn)
-    user_session.update_activity()
-    
-    # TODO: Generate AI responses (placeholder)
-    ai_responses = [
-        {
-            "juror_id": "juror_1",
-            "statement": "That's an interesting point. What evidence supports that?",
-            "timestamp": datetime.now().isoformat()
-        }
-    ]
-    
+
+    if not result.get("success"):
+        raise HTTPException(status_code=500, detail=result.get("error", "Failed to submit statement"))
+
     # Broadcast to WebSocket clients
     await broadcast_to_session(session_id, {
         "type": "deliberation_turn",
-        "user_turn": user_turn.model_dump(by_alias=True),
-        "ai_responses": ai_responses
+        "turns": result.get("turns", []),
+        "deliberation_ended": result.get("deliberation_ended", False)
     })
-    
+
+    turns = result.get("turns", [])
+    user_turn = turns[0] if turns else {}
+    ai_responses = turns[1:] if len(turns) > 1 else []
+
     return SubmitStatementResponse(
-        userTurn=user_turn.model_dump(by_alias=True),
+        userTurn=user_turn,
         aiResponses=ai_responses
     )
 
@@ -262,35 +247,33 @@ async def submit_vote(session_id: str, request: SubmitVoteRequest):
     """
     if session_id not in active_sessions:
         raise HTTPException(status_code=404, detail="Session not found")
-    
+
     session_data = active_sessions[session_id]
-    user_session: UserSession = session_data["session"]
-    
+    orchestrator: ExperienceOrchestrator = session_data["orchestrator"]
+
     # Verify in voting state
-    if user_session.current_state != ExperienceState.ANONYMOUS_VOTE:
+    if orchestrator.state_machine.current_state != ExperienceState.ANONYMOUS_VOTE:
         raise HTTPException(status_code=400, detail="Not in voting state")
-    
-    # Store vote
-    user_session.progress.vote = request.vote
-    user_session.update_activity()
-    
-    # TODO: Collect AI votes and calculate verdict (placeholder)
-    guilty_count = 5 if request.vote == "guilty" else 3
-    not_guilty_count = 8 - guilty_count
-    verdict = "guilty" if guilty_count >= 5 else "not_guilty"
-    
+
+    # Submit through orchestrator
+    result = await orchestrator.submit_vote(request.vote)
+
+    if not result.get("success"):
+        raise HTTPException(status_code=500, detail=result.get("error", "Failed to submit vote"))
+
+    dual_reveal = result.get("dual_reveal", {})
+    verdict_data = dual_reveal.get("verdict", {})
+
     # Broadcast to WebSocket clients
     await broadcast_to_session(session_id, {
-        "type": "vote_submitted",
-        "verdict": verdict,
-        "guilty_count": guilty_count,
-        "not_guilty_count": not_guilty_count
+        "type": "vote_result",
+        "dual_reveal": dual_reveal
     })
-    
+
     return SubmitVoteResponse(
-        verdict=verdict,
-        guiltyCount=guilty_count,
-        notGuiltyCount=not_guilty_count
+        verdict=verdict_data.get("verdict", "unknown"),
+        guiltyCount=verdict_data.get("guiltyCount", 0),
+        notGuiltyCount=verdict_data.get("notGuiltyCount", 0)
     )
 
 
@@ -312,6 +295,65 @@ async def get_case(case_id: str):
         raise HTTPException(status_code=404, detail=f"Case {case_id} not found")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to load case: {str(e)}")
+
+
+@app.post("/api/sessions/{session_id}/start")
+async def start_experience(session_id: str):
+    """Start the experience (transition to hook scene)."""
+    if session_id not in active_sessions:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    orchestrator: ExperienceOrchestrator = active_sessions[session_id]["orchestrator"]
+    result = await orchestrator.start_experience()
+
+    if not result.get("success"):
+        raise HTTPException(status_code=500, detail=result.get("error", "Failed to start"))
+
+    await broadcast_to_session(session_id, {"type": "experience_started", "stage": result.get("stage")})
+    return result
+
+
+@app.post("/api/sessions/{session_id}/advance")
+async def advance_stage(session_id: str):
+    """Advance to the next trial stage."""
+    if session_id not in active_sessions:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    orchestrator: ExperienceOrchestrator = active_sessions[session_id]["orchestrator"]
+    result = await orchestrator.advance_trial_stage()
+
+    if not result.get("success"):
+        raise HTTPException(status_code=500, detail=result.get("error", "Failed to advance"))
+
+    await broadcast_to_session(session_id, {"type": "stage_advanced", "stage": result.get("stage")})
+    return result
+
+
+@app.post("/api/sessions/{session_id}/complete")
+async def complete_experience(session_id: str, share_verdict: bool = False):
+    """Complete the experience."""
+    if session_id not in active_sessions:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    orchestrator: ExperienceOrchestrator = active_sessions[session_id]["orchestrator"]
+    result = await orchestrator.complete_experience(share_verdict)
+
+    if not result.get("success"):
+        raise HTTPException(status_code=500, detail=result.get("error", "Failed to complete"))
+
+    # Clean up session
+    del active_sessions[session_id]
+    return result
+
+
+@app.get("/api/sessions/{session_id}/evidence")
+async def get_evidence(session_id: str):
+    """Get evidence board data."""
+    if session_id not in active_sessions:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    orchestrator: ExperienceOrchestrator = active_sessions[session_id]["orchestrator"]
+    return orchestrator.get_evidence_board()
 
 
 # ============================================================================
@@ -340,26 +382,26 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
     
     try:
         # Send initial state
-        user_session: UserSession = session_data["session"]
+        orchestrator: ExperienceOrchestrator = session_data["orchestrator"]
         await websocket.send_json({
             "type": "connection_established",
             "session_id": session_id,
-            "current_state": user_session.current_state.value
+            "current_state": orchestrator.state_machine.current_state.value
         })
-        
+
         # Keep connection alive and handle messages
         while True:
             data = await websocket.receive_text()
             message = json.loads(data)
-            
+
             # Handle different message types
             if message.get("type") == "ping":
                 await websocket.send_json({"type": "pong"})
-            
+
             elif message.get("type") == "request_state":
                 await websocket.send_json({
                     "type": "state_update",
-                    "current_state": user_session.current_state.value,
+                    "current_state": orchestrator.state_machine.current_state.value,
                     "timestamp": datetime.now().isoformat()
                 })
     
@@ -387,7 +429,7 @@ async def broadcast_to_session(session_id: str, message: dict):
     clients = session_data["websocket_clients"]
     
     # Send to all connected clients
-    for client in clients:
+    for client in list(clients):
         try:
             await client.send_json(message)
         except Exception as e:

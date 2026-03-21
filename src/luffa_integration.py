@@ -100,34 +100,34 @@ Are you ready to begin?"""
             stage: The new stage being entered
             
         Returns:
-            Stage announcement message
+            Stage announcement message with visual formatting
         """
         announcements = {
-            ExperienceState.HOOK_SCENE: "The trial is about to begin. Please observe carefully.",
+            ExperienceState.HOOK_SCENE: "🎭 THE TRIAL BEGINS\n\nThe trial is about to begin. Please observe carefully.",
             
-            ExperienceState.CHARGE_READING: "The Clerk will now read the formal charges.",
+            ExperienceState.CHARGE_READING: "⚖️ CHARGE READING\n\nThe Clerk will now read the formal charges against the defendant.",
             
-            ExperienceState.PROSECUTION_OPENING: "The Crown Prosecution will present their opening statement.",
+            ExperienceState.PROSECUTION_OPENING: "👔 PROSECUTION OPENING\n\nThe Crown Prosecution will present their opening statement.",
             
-            ExperienceState.DEFENCE_OPENING: "The Defence will now present their opening statement.",
+            ExperienceState.DEFENCE_OPENING: "🛡️ DEFENCE OPENING\n\nThe Defence will now present their opening statement.",
             
-            ExperienceState.EVIDENCE_PRESENTATION: "We will now hear the evidence. The Evidence Board is now available for your reference.",
+            ExperienceState.EVIDENCE_PRESENTATION: "📋 EVIDENCE PRESENTATION\n\nWe will now hear the evidence. The Evidence Board is now available for your reference.",
             
-            ExperienceState.CROSS_EXAMINATION: "Cross-examination will now proceed.",
+            ExperienceState.CROSS_EXAMINATION: "❓ CROSS-EXAMINATION\n\nCross-examination will now proceed.",
             
-            ExperienceState.PROSECUTION_CLOSING: "The Crown Prosecution will deliver their closing speech.",
+            ExperienceState.PROSECUTION_CLOSING: "👔 PROSECUTION CLOSING\n\nThe Crown Prosecution will deliver their closing speech.",
             
-            ExperienceState.DEFENCE_CLOSING: "The Defence will deliver their closing speech.",
+            ExperienceState.DEFENCE_CLOSING: "🛡️ DEFENCE CLOSING\n\nThe Defence will deliver their closing speech.",
             
-            ExperienceState.JUDGE_SUMMING_UP: "The Judge will now sum up the case and provide legal instructions.",
+            ExperienceState.JUDGE_SUMMING_UP: "⚖️ JUDGE'S SUMMING UP\n\nThe Judge will now sum up the case and provide legal instructions to the jury.",
             
-            ExperienceState.JURY_DELIBERATION: "You may now retire to the jury chamber to deliberate with your fellow jurors.",
+            ExperienceState.JURY_DELIBERATION: "🗣️ JURY DELIBERATION\n\nYou may now retire to the jury chamber to deliberate with your fellow jurors.\n\nShare your thoughts on the evidence and discuss the case.",
             
-            ExperienceState.ANONYMOUS_VOTE: "It is time to cast your vote. Your vote will remain anonymous until the final reveal.",
+            ExperienceState.ANONYMOUS_VOTE: "🗳️ TIME TO VOTE\n\nIt is time to cast your verdict. Your vote will remain anonymous until the final reveal.",
             
-            ExperienceState.DUAL_REVEAL: "The verdict will now be revealed, along with the truth of the case.",
+            ExperienceState.DUAL_REVEAL: "📊 VERDICT REVEAL\n\nThe verdict will now be revealed, along with the truth of the case.",
             
-            ExperienceState.COMPLETED: "The trial is complete. Thank you for your service."
+            ExperienceState.COMPLETED: "✅ TRIAL COMPLETE\n\nThe trial is complete. Thank you for your service as a juror."
         }
         
         content = announcements.get(stage, f"Proceeding to {stage.value}")
@@ -163,6 +163,97 @@ Are you ready to begin?"""
                 logger.warning(f"Failed to send stage announcement via API: {e}")
         
         return message
+    
+    async def broadcast_stage_to_group(self, group_id: str, stage: ExperienceState) -> dict:
+        """
+        Broadcast stage announcement to group with visual formatting and buttons.
+        
+        Args:
+            group_id: Group ID to broadcast to
+            stage: The new stage being entered
+            
+        Returns:
+            Broadcast result
+        """
+        if not self.api_client:
+            logger.warning("Cannot broadcast to group - API client not initialized")
+            return {"success": False, "error": "API client not initialized"}
+        
+        # Get formatted announcement
+        message = self.announce_stage(stage)
+        
+        # Determine if buttons are needed for this stage
+        buttons = None
+        
+        # Add continue button for stages that need user progression
+        if stage in [
+            ExperienceState.HOOK_SCENE,
+            ExperienceState.CHARGE_READING,
+            ExperienceState.PROSECUTION_OPENING,
+            ExperienceState.DEFENCE_OPENING,
+            ExperienceState.EVIDENCE_PRESENTATION,
+            ExperienceState.CROSS_EXAMINATION,
+            ExperienceState.PROSECUTION_CLOSING,
+            ExperienceState.DEFENCE_CLOSING,
+            ExperienceState.JUDGE_SUMMING_UP
+        ]:
+            buttons = [
+                {
+                    "name": "▶️ Continue",
+                    "selector": "/continue",
+                    "isHidden": "0"  # Visible to all
+                }
+            ]
+        
+        # Add vote buttons for voting stage
+        elif stage == ExperienceState.ANONYMOUS_VOTE:
+            buttons = [
+                {
+                    "name": "✅ GUILTY",
+                    "selector": "/vote guilty",
+                    "isHidden": "1"  # Hidden from others
+                },
+                {
+                    "name": "❌ NOT GUILTY",
+                    "selector": "/vote not_guilty",
+                    "isHidden": "1"  # Hidden from others
+                }
+            ]
+        
+        # Add evidence button for deliberation
+        elif stage == ExperienceState.JURY_DELIBERATION:
+            buttons = [
+                {
+                    "name": "📋 View Evidence",
+                    "selector": "/evidence",
+                    "isHidden": "0"  # Visible to all
+                }
+            ]
+        
+        try:
+            # Send to group with buttons
+            result = await self.api_client.send_group_message(
+                group_id=group_id,
+                text=message.content,
+                buttons=buttons,
+                dismiss_type="select" if buttons else None  # Persist buttons
+            )
+            
+            return {
+                "success": True,
+                "stage": stage.value,
+                "message": message.content,
+                "buttons_sent": buttons is not None,
+                "api_response": result
+            }
+        
+        except Exception as e:
+            logger.error(f"Failed to broadcast stage to group: {e}")
+            return {
+                "success": False,
+                "error": str(e),
+                "stage": stage.value
+            }
 
     def prompt_superbox_launch(self, stage: ExperienceState) -> LuffaBotMessage:
         """
@@ -324,9 +415,11 @@ class SuperBox:
             try:
                 await self.api_client.render_superbox_scene(
                     session_id=session_id,
-                    scene_type=scene.scene_type,
-                    elements=[e.model_dump(by_alias=True) for e in scene.elements],
-                    active_agent=active_agent
+                    scene_data={
+                        "scene_type": scene.scene_type,
+                        "elements": [e.model_dump(by_alias=True) for e in scene.elements],
+                        "active_agent": active_agent
+                    }
                 )
             except Exception as e:
                 logger.warning(f"Failed to render courtroom scene via API: {e}")

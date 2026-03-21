@@ -1,9 +1,12 @@
 """State machine for managing VERITAS experience flow."""
 
+import logging
 from datetime import datetime, timedelta
 from enum import Enum
 from typing import Optional, Callable, Awaitable, TYPE_CHECKING
 from pydantic import BaseModel, Field, ConfigDict
+
+logger = logging.getLogger("veritas")
 
 if TYPE_CHECKING:
     from src.session import UserSession, SessionStore
@@ -142,6 +145,10 @@ class StateMachine:
         elapsed = self.get_elapsed_time_seconds()
         if elapsed > self.max_duration_minutes * 60:
             # Force completion if max duration exceeded
+            logger.warning(
+                f"Max duration ({self.max_duration_minutes}min) exceeded. "
+                f"Forcing transition to COMPLETED from {self.current_state}"
+            )
             target_state = ExperienceState.COMPLETED
         
         # Exit current state

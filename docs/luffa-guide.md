@@ -14,7 +14,7 @@ Transform VERITAS into an immersive group chat courtroom experience where AI age
   - ⚖️ **Prosecution**: Argues for guilt
   - 🛡️ **Defence**: Creates reasonable doubt
   - 👨‍⚖️ **Judge**: Provides legal guidance
-  - 👥 **AI Jurors**: 7 AI jurors with distinct personalities
+  - 👥 **AI Jurors**: 7 AI jurors (3 active + 4 lightweight) with distinct personalities
 
 ### Interactive Storytelling
 - Users participate as the 8th juror
@@ -366,9 +366,9 @@ tail -f veritas.log  # If logging to file
 ```
 
 **Need help?** Review:
-- `QUICK_REFERENCE.md` - System overview
-- `SYSTEM_STATUS.md` - Component status
-- `INTEGRATION_COMPLETE.md` - Integration details
+- `docs/setup.md` - Installation and configuration
+- `docs/status.md` - Component status and known limitations
+- `docs/architecture.md` - System components and implementation
 
 ---
 

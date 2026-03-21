@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import json
+from collections import OrderedDict
 from typing import Optional, Any, List
 import aiohttp
 from datetime import datetime
@@ -27,10 +28,11 @@ class LuffaBotAPIClient:
             config: Luffa platform configuration (uses apiKey as bot secret)
         """
         self.config = config
-        self.base_url = "https://apibot.luffa.im/robot"
+        self.base_url = config.api_base_url
         self.bot_secret = config.api_key
         self.session: Optional[aiohttp.ClientSession] = None
-        self.seen_message_ids = set()  # For deduplication
+        self.seen_message_ids = OrderedDict()  # For ordered deduplication
+        self._max_seen_ids = 10000
 
     async def __aenter__(self):
         """Async context manager entry."""
@@ -70,11 +72,13 @@ class LuffaBotAPIClient:
         url = f"{self.base_url}{endpoint}"
         
         try:
-            async with asyncio.timeout(timeout):
+            async def _do_request():
                 async with self.session.post(url, json=data) as response:
                     response.raise_for_status()
                     return await response.json()
-        
+
+            return await asyncio.wait_for(_do_request(), timeout=timeout)
+
         except asyncio.TimeoutError:
             logger.error(f"Luffa Bot API request timed out: {endpoint}")
             raise
@@ -98,24 +102,41 @@ class LuffaBotAPIClient:
         
         try:
             # Response is a raw array, not wrapped in {code, data}
-            messages = await self._make_request(
+            response = await self._make_request(
                 endpoint="/receive",
                 data={"secret": self.bot_secret}
             )
             
+            # Handle different response formats
+            messages = response if isinstance(response, list) else []
+            
             # Parse and deduplicate messages
             parsed_messages = []
             for msg_obj in messages:
-                for msg_str in msg_obj.get("message", []):
+                # Handle both dict and string formats
+                if isinstance(msg_obj, str):
+                    logger.debug(f"Skipping string message: {msg_obj[:50]}")
+                    continue
+                
+                if not isinstance(msg_obj, dict):
+                    logger.warning(f"Unexpected message format: {type(msg_obj)}")
+                    continue
+                
+                # Extract message array
+                message_array = msg_obj.get("message", [])
+                
+                for msg_str in message_array:
                     try:
-                        parsed = json.loads(msg_str)
+                        # Parse JSON message
+                        parsed = json.loads(msg_str) if isinstance(msg_str, str) else msg_str
                         msg_id = parsed.get("msgId")
                         
                         # Deduplicate by msgId
                         if msg_id and msg_id not in self.seen_message_ids:
-                            self.seen_message_ids.add(msg_id)
+                            self.seen_message_ids[msg_id] = None
                             parsed_messages.append({
                                 "uid": msg_obj.get("uid"),  # Sender or group ID
+                                "gid": msg_obj.get("uid") if msg_obj.get("type") == 1 else None,  # Group ID
                                 "type": msg_obj.get("type"),  # 0=DM, 1=Group
                                 "text": parsed.get("text"),
                                 "msgId": msg_id,
@@ -123,9 +144,16 @@ class LuffaBotAPIClient:
                                 "atList": parsed.get("atList", []),
                                 "urlLink": parsed.get("urlLink")
                             })
-                    except json.JSONDecodeError as e:
+                    except (json.JSONDecodeError, TypeError) as e:
                         logger.warning(f"Failed to parse message: {e}")
             
+            # Prune seen IDs to prevent unbounded growth
+            if len(self.seen_message_ids) > self._max_seen_ids:
+                # Evict oldest entries (FIFO) to keep most recent half
+                to_remove = len(self.seen_message_ids) - (self._max_seen_ids // 2)
+                for _ in range(to_remove):
+                    self.seen_message_ids.popitem(last=False)
+
             return parsed_messages
         
         except Exception as e:
@@ -178,18 +206,20 @@ class LuffaBotAPIClient:
         group_id: str,
         text: str,
         buttons: Optional[List[dict]] = None,
-        confirm_buttons: Optional[List[dict]] = None,
-        dismiss_type: str = "select"
+        confirm: Optional[List[dict]] = None,
+        dismiss_type: str = "select",
+        at_list: Optional[List[dict]] = None
     ) -> dict:
         """
         Send a group message with optional buttons.
         
         Args:
-            group_id: Group ID
-            text: Message text
-            buttons: Optional list of button objects
-            confirm_buttons: Optional list of confirm button objects
+            group_id: Group ID (Luffa group ID)
+            text: Message text (supports line breaks \n)
+            button: Optional list of button objects (regular buttons)
+            confirm: Optional list of confirm button objects (confirm/cancel style)
             dismiss_type: "select" (persist) or "dismiss" (disappear after click)
+            at_list: Optional list of @mention objects
             
         Returns:
             API response
@@ -206,13 +236,17 @@ class LuffaBotAPIClient:
             msg_type = "1"
             
             # Type 2: Text with buttons
-            if buttons or confirm_buttons:
+            if buttons or confirm:
                 msg_type = "2"
                 if buttons:
                     msg_obj["button"] = buttons
-                if confirm_buttons:
-                    msg_obj["confirm"] = confirm_buttons
+                if confirm:
+                    msg_obj["confirm"] = confirm
                 msg_obj["dismissType"] = dismiss_type
+            
+            # Add @mentions if provided
+            if at_list:
+                msg_obj["atList"] = at_list
             
             msg_json = json.dumps(msg_obj)
             
@@ -326,6 +360,64 @@ class LuffaBotAPIClient:
             buttons=buttons,
             dismiss_type="dismiss"  # Disappear after click
         )
+
+    # ========================================================================
+    # Placeholder Methods (APIs not yet available)
+    # ========================================================================
+
+    async def render_superbox_scene(
+        self,
+        session_id: str,
+        scene_data: dict
+    ) -> dict:
+        """
+        Render a SuperBox scene (placeholder — SuperBox API not yet available).
+
+        Args:
+            session_id: Session identifier
+            scene_data: Scene configuration data
+
+        Returns:
+            Result dict
+        """
+        logger.info(f"SuperBox render requested for session {session_id} (not yet implemented)")
+        return {"success": True, "rendered": False, "reason": "SuperBox API not available"}
+
+    async def share_verdict(
+        self,
+        case_id: str,
+        verdict: str,
+        anonymous: bool = True
+    ) -> dict:
+        """
+        Share verdict to Luffa Channel (placeholder — Channel API not yet available).
+
+        Args:
+            case_id: Case identifier
+            verdict: The verdict to share
+            anonymous: Whether to share anonymously
+
+        Returns:
+            Result dict
+        """
+        logger.info(f"Verdict share requested for case {case_id} (not yet implemented)")
+        return {"success": True, "shared": False, "reason": "Channel API not available"}
+
+    async def get_verdict_statistics(
+        self,
+        case_id: str
+    ) -> dict:
+        """
+        Get aggregate verdict statistics from Luffa Channel (placeholder).
+
+        Args:
+            case_id: Case identifier
+
+        Returns:
+            Statistics dict
+        """
+        logger.info(f"Verdict statistics requested for case {case_id} (not yet implemented)")
+        return {"total_votes": 0, "guilty_percentage": 0.0, "not_guilty_percentage": 0.0}
 
 
 # Alias for backward compatibility

@@ -14,7 +14,7 @@ The system's core innovation lies in its dual-layer evaluation model. Unlike tra
 ### Key Technical Challenges
 
 1. **State Machine Complexity**: Managing seamless transitions through 8+ trial stages while preserving user progress and enforcing timing constraints
-2. **Multi-Agent Orchestration**: Coordinating 5 trial agents (Clerk, Prosecution, Defence, Fact Checker, Judge) with distinct roles and 7 AI jurors with varied personas
+2. **Multi-Agent Orchestration**: Coordinating 5 trial agents (Clerk, Prosecution, Defence, Fact Checker, Judge) with distinct roles and 8 jurors (3 active AI, 4 lightweight AI, 1 human) with varied personas
 3. **Real-Time Reasoning Evaluation**: Analyzing user arguments during deliberation to assess logical coherence, evidence citation, and fallacy detection
 4. **Evidence Timeline Visualization**: Presenting 5-7 evidence items in an interactive, chronologically organized interface
 5. **Anonymous Voting Mechanism**: Collecting simultaneous votes from 8 jurors while maintaining anonymity until reveal
@@ -288,7 +288,7 @@ interface DeliberationTurn {
 ```
 
 **Key Methods:**
-- `initializeJury(caseContent: CaseContent): Promise<void>` - Creates 7 AI jurors with personas
+- `initializeJury(caseContent: CaseContent): Promise<void>` - Creates 8 jurors (7 AI with personas + 1 human)
 - `startDeliberation(): Promise<void>` - Begins deliberation phase
 - `processUserStatement(statement: string): Promise<DeliberationTurn[]>` - User speaks, AI jurors respond
 - `collectVotes(): Promise<VoteResult>` - Gathers anonymous votes from all 8 jurors

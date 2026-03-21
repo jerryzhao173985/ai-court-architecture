@@ -19,13 +19,26 @@ class LuffaBotService:
     
     AI agents post as different characters in the group chat,
     users can interact and influence the story outcome.
+    
+    Session Management (Task 22.4):
+    - Maps Luffa user IDs (uid) to session IDs
+    - Supports multiple concurrent users in the same group
+    - Handles session recovery for disconnected users
     """
 
     def __init__(self):
         """Initialize Luffa Bot service."""
         self.config = load_config()
         self.client = LuffaBotAPIClient(self.config.luffa)
+        
+        # Session management (Task 22.4)
+        # Map: uid -> session_id
+        self.uid_to_session: Dict[str, str] = {}
+        # Map: session_id -> ExperienceOrchestrator
         self.active_sessions: Dict[str, ExperienceOrchestrator] = {}
+        # Map: group_id -> set of uids (users in that group)
+        self.group_users: Dict[str, set] = {}
+        
         self.running = False
 
     async def start(self):
@@ -93,22 +106,23 @@ class LuffaBotService:
             msg: Full message object
         """
         cmd = command.lower().split()[0]
+        sender_uid = msg.get("sender_uid") or uid  # Get actual user ID
         
         if cmd == "/start":
-            await self.start_trial(uid, msg_type)
+            await self.start_trial(uid, msg_type, sender_uid)
         
         elif cmd == "/continue":
-            await self.continue_trial(uid)
+            await self.continue_trial(uid, sender_uid)
         
         elif cmd == "/vote":
             vote = command.split()[1] if len(command.split()) > 1 else None
-            await self.handle_vote(uid, vote, msg.get("sender_uid"))
+            await self.handle_vote(uid, vote, sender_uid)
         
         elif cmd == "/evidence":
-            await self.show_evidence(uid)
+            await self.show_evidence(uid, sender_uid)
         
         elif cmd == "/status":
-            await self.show_status(uid)
+            await self.show_status(uid, sender_uid)
         
         elif cmd == "/help":
             await self.show_help(uid, msg_type)
@@ -119,30 +133,50 @@ class LuffaBotService:
             else:  # DM
                 await self.client.send_dm(uid, "Unknown command. Type /help for available commands.")
 
-    async def start_trial(self, group_id: str, msg_type: int):
+    async def start_trial(self, group_id: str, msg_type: int, sender_uid: str):
         """
-        Start a new trial in a group.
+        Start a new trial for a user in a group.
+        
+        Supports multiple concurrent users in the same group (Task 22.4).
         
         Args:
             group_id: Group ID
             msg_type: Message type
+            sender_uid: User who initiated the trial
         """
         if msg_type != 1:  # Must be group
             await self.client.send_dm(group_id, "Trials can only be started in group chats.")
             return
         
-        if group_id in self.active_sessions:
+        if not sender_uid:
+            await self.client.send_group_message(group_id, "⚠️ Could not identify user. Please try again.")
+            return
+        
+        # Check if user already has an active session
+        existing_orchestrator = self._get_user_orchestrator(sender_uid)
+        if existing_orchestrator:
             await self.client.send_group_message(
                 group_id,
-                "⚠️ A trial is already in progress. Use /continue to proceed or /status to check progress."
+                f"⚠️ You already have a trial in progress. Use /continue to proceed or /status to check progress."
+            )
+            return
+        
+        # Try to restore session for disconnected user
+        orchestrator = await self._get_or_restore_orchestrator(sender_uid, group_id)
+        
+        if orchestrator:
+            # Session restored
+            await self.client.send_group_message(
+                group_id,
+                f"✅ Welcome back! Your session has been restored.\n\nUse /status to see your progress, or /continue to proceed."
             )
             return
         
         # Create new session
-        session_id = f"luffa_{group_id}_{int(datetime.now().timestamp())}"
+        session_id = self._get_or_create_session_id(sender_uid, group_id)
         orchestrator = ExperienceOrchestrator(
             session_id=session_id,
-            user_id=group_id,
+            user_id=sender_uid,
             case_id="blackthorn-hall-001"
         )
         
@@ -150,13 +184,17 @@ class LuffaBotService:
         init_result = await orchestrator.initialize()
         
         if not init_result["success"]:
+            # Clean up orphaned session mapping
+            self.uid_to_session.pop(sender_uid, None)
+            if group_id in self.group_users:
+                self.group_users[group_id].discard(sender_uid)
             await self.client.send_group_message(
                 group_id,
                 f"❌ Failed to start trial: {init_result.get('error')}"
             )
             return
         
-        self.active_sessions[group_id] = orchestrator
+        self.active_sessions[session_id] = orchestrator
         
         # Send greeting
         greeting = init_result["greeting"]["content"]
@@ -175,14 +213,19 @@ class LuffaBotService:
                 "Type /continue to proceed to the trial."
             )
 
-    async def continue_trial(self, group_id: str):
+    async def continue_trial(self, group_id: str, sender_uid: str):
         """
-        Continue to next trial stage.
+        Continue to next trial stage for a specific user.
         
         Args:
             group_id: Group ID
+            sender_uid: User who sent the command
         """
-        orchestrator = self.active_sessions.get(group_id)
+        if not sender_uid:
+            await self.client.send_group_message(group_id, "⚠️ Could not identify user.")
+            return
+        
+        orchestrator = self._get_user_orchestrator(sender_uid)
         
         if not orchestrator:
             await self.client.send_group_message(
@@ -269,7 +312,11 @@ class LuffaBotService:
             group_id: Group ID
             msg: Full message object
         """
-        orchestrator = self.active_sessions.get(group_id)
+        sender_uid = msg.get("sender_uid") or msg.get("uid")
+        if not sender_uid:
+            return
+        
+        orchestrator = self._get_user_orchestrator(sender_uid)
         
         if not orchestrator:
             return
@@ -308,7 +355,11 @@ class LuffaBotService:
             vote: Vote value (guilty/not_guilty)
             sender_uid: User who voted
         """
-        orchestrator = self.active_sessions.get(group_id)
+        if not sender_uid:
+            await self.client.send_group_message(group_id, "⚠️ Could not identify user.")
+            return
+        
+        orchestrator = self._get_user_orchestrator(sender_uid)
         
         if not orchestrator:
             await self.client.send_group_message(
@@ -330,15 +381,16 @@ class LuffaBotService:
         vote_result = await orchestrator.submit_vote(vote)
         
         if vote_result["success"]:
-            await self.send_dual_reveal(group_id, vote_result["dual_reveal"])
+            await self.send_dual_reveal(group_id, vote_result["dual_reveal"], sender_uid)
 
-    async def send_dual_reveal(self, group_id: str, dual_reveal: dict):
+    async def send_dual_reveal(self, group_id: str, dual_reveal: dict, sender_uid: str):
         """
         Send dual reveal in sequence.
         
         Args:
             group_id: Group ID
             dual_reveal: Dual reveal data
+            sender_uid: User who completed the trial
         """
         # 1. Verdict
         verdict = dual_reveal["verdict"]
@@ -393,13 +445,22 @@ Coherence Score: {assessment['coherenceScore']:.2f}/1.0
             "✅ Trial complete! Thank you for participating.\n\nType /start to begin a new trial."
         )
         
-        # Clean up session
-        if group_id in self.active_sessions:
-            del self.active_sessions[group_id]
+        # Clean up user session (Task 22.4)
+        self._cleanup_user_session(sender_uid, group_id)
 
-    async def show_evidence(self, group_id: str):
-        """Show evidence board."""
-        orchestrator = self.active_sessions.get(group_id)
+    async def show_evidence(self, group_id: str, sender_uid: str):
+        """
+        Show evidence board.
+        
+        Args:
+            group_id: Group ID
+            sender_uid: User requesting evidence
+        """
+        if not sender_uid:
+            await self.client.send_group_message(group_id, "⚠️ Could not identify user.")
+            return
+        
+        orchestrator = self._get_user_orchestrator(sender_uid)
         
         if not orchestrator:
             await self.client.send_group_message(
@@ -416,9 +477,19 @@ Coherence Score: {assessment['coherenceScore']:.2f}/1.0
         
         await self.client.send_group_message(group_id, text)
 
-    async def show_status(self, group_id: str):
-        """Show current trial status."""
-        orchestrator = self.active_sessions.get(group_id)
+    async def show_status(self, group_id: str, sender_uid: str):
+        """
+        Show current trial status.
+        
+        Args:
+            group_id: Group ID
+            sender_uid: User requesting status
+        """
+        if not sender_uid:
+            await self.client.send_group_message(group_id, "⚠️ Could not identify user.")
+            return
+        
+        orchestrator = self._get_user_orchestrator(sender_uid)
         
         if not orchestrator:
             await self.client.send_group_message(
@@ -466,6 +537,150 @@ The story adapts based on your participation!"""
         """Stop the bot service."""
         logger.info("Stopping VERITAS Luffa Bot service...")
         self.running = False
+
+    # ========================================================================
+    # Session Management (Task 22.4)
+    # ========================================================================
+
+    def _get_or_create_session_id(self, uid: str, group_id: str) -> str:
+        """
+        Get existing session ID for user or create a new one.
+        
+        Maps Luffa user ID to session ID, supporting multiple concurrent
+        users in the same group.
+        
+        Args:
+            uid: Luffa user ID
+            group_id: Group ID (for session naming)
+            
+        Returns:
+            Session ID for this user
+        """
+        # Check if user already has a session
+        if uid in self.uid_to_session:
+            return self.uid_to_session[uid]
+        
+        # Create new session ID
+        session_id = f"luffa_{group_id}_{uid}_{int(datetime.now().timestamp())}"
+        self.uid_to_session[uid] = session_id
+        
+        # Track user in group
+        if group_id not in self.group_users:
+            self.group_users[group_id] = set()
+        self.group_users[group_id].add(uid)
+        
+        return session_id
+
+    async def _get_or_restore_orchestrator(
+        self, 
+        uid: str, 
+        group_id: str,
+        case_id: str = "blackthorn-hall-001"
+    ) -> Optional[ExperienceOrchestrator]:
+        """
+        Get existing orchestrator or restore from persistent storage.
+        
+        Handles session recovery for disconnected users (Requirement 2.4).
+        
+        Args:
+            uid: Luffa user ID
+            group_id: Group ID
+            case_id: Case ID to load
+            
+        Returns:
+            ExperienceOrchestrator if found/restored, None if needs creation
+        """
+        session_id = self._get_or_create_session_id(uid, group_id)
+        
+        # Check if already in memory
+        if session_id in self.active_sessions:
+            return self.active_sessions[session_id]
+        
+        # Try to restore from persistent storage
+        from session import SessionStore
+        session_store = SessionStore()
+        
+        # Look for any session for this user (may have different timestamp)
+        # Search by uid pattern
+        for stored_session_path in session_store.storage_dir.glob(f"luffa_{group_id}_{uid}_*.json"):
+            try:
+                stored_session_id = stored_session_path.stem
+                user_session = session_store.restore_progress(stored_session_id)
+                
+                if user_session and not user_session.is_expired(retention_hours=24):
+                    # Restore orchestrator
+                    logger.info(f"Restoring session {stored_session_id} for user {uid}")
+                    
+                    orchestrator = ExperienceOrchestrator(
+                        session_id=stored_session_id,
+                        user_id=uid,
+                        case_id=user_session.case_id
+                    )
+                    
+                    # Initialize orchestrator
+                    init_result = await orchestrator.initialize()
+                    if not init_result["success"]:
+                        logger.warning(f"Failed to restore session: {init_result.get('error')}")
+                        continue
+                    
+                    # Restore state
+                    orchestrator.user_session = user_session
+                    orchestrator.state_machine.current_state = user_session.current_state
+                    orchestrator.state_machine.state_history = user_session.state_history
+                    
+                    # Store in active sessions
+                    self.active_sessions[stored_session_id] = orchestrator
+                    self.uid_to_session[uid] = stored_session_id
+                    
+                    return orchestrator
+                    
+            except Exception as e:
+                logger.warning(f"Failed to restore session from {stored_session_path}: {e}")
+                continue
+        
+        # No session found
+        return None
+
+    def _cleanup_user_session(self, uid: str, group_id: str) -> None:
+        """
+        Clean up user session after completion.
+        
+        Args:
+            uid: Luffa user ID
+            group_id: Group ID
+        """
+        session_id = self.uid_to_session.get(uid)
+        
+        if session_id:
+            # Remove from active sessions
+            if session_id in self.active_sessions:
+                del self.active_sessions[session_id]
+            
+            # Remove uid mapping
+            del self.uid_to_session[uid]
+        
+        # Remove from group users
+        if group_id in self.group_users:
+            self.group_users[group_id].discard(uid)
+            
+            # Clean up empty group
+            if not self.group_users[group_id]:
+                del self.group_users[group_id]
+
+    def _get_user_orchestrator(self, uid: str) -> Optional[ExperienceOrchestrator]:
+        """
+        Get orchestrator for a specific user.
+        
+        Args:
+            uid: Luffa user ID
+            
+        Returns:
+            ExperienceOrchestrator if user has active session, None otherwise
+        """
+        session_id = self.uid_to_session.get(uid)
+        if session_id:
+            return self.active_sessions.get(session_id)
+        return None
 
 
 async def main():

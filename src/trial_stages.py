@@ -292,11 +292,14 @@ The trial is about to begin. Justice awaits."""
         ]
         
         # Calculate progress
-        total_stages = len(all_stages) - 1  # Exclude NOT_STARTED
+        total_stages = len(all_stages)  # NOT_STARTED is already excluded from list
         current_index = all_stages.index(current_stage) if current_stage in all_stages else 0
         completed_count = len(completed_stages)
-        
-        progress_percentage = (completed_count / total_stages) * 100
+
+        if current_stage == ExperienceState.COMPLETED:
+            progress_percentage = 100.0
+        else:
+            progress_percentage = (current_index / total_stages) * 100
         
         return {
             "current_stage": current_stage.value,

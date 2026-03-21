@@ -3,9 +3,16 @@
   "userId": "test_user",
   "caseId": "blackthorn-hall-001",
   "currentState": "hook_scene",
-  "startTime": "2026-03-21T09:09:16.968979",
-  "lastActivityTime": "2026-03-21T09:09:16.968980",
-  "stateHistory": [],
+  "startTime": "2026-03-21T12:06:25.502208",
+  "lastActivityTime": "2026-03-21T12:06:25.502209",
+  "stateHistory": [
+    {
+      "state": "hook_scene",
+      "enteredAt": "2026-03-21T12:06:25.502303",
+      "exitedAt": null,
+      "durationSeconds": null
+    }
+  ],
   "progress": {
     "completedStages": [],
     "deliberationStatements": [],

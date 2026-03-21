@@ -53,7 +53,8 @@ class LLMService:
         max_tokens: Optional[int] = None,
         temperature: Optional[float] = None,
         timeout: Optional[int] = None,
-        model_override: Optional[str] = None
+        model_override: Optional[str] = None,
+        response_format: Optional[dict] = None
     ) -> str:
         """
         Generate response from LLM.
@@ -64,6 +65,7 @@ class LLMService:
             max_tokens: Maximum tokens to generate (uses config default if None)
             temperature: Temperature for generation (uses config default if None)
             timeout: Timeout in seconds (uses config default if None)
+            response_format: Response format (e.g., {"type": "json_object"} for JSON mode)
             
         Returns:
             Generated text response
@@ -72,20 +74,22 @@ class LLMService:
             TimeoutError: If generation exceeds timeout
             Exception: If API call fails
         """
-        max_tokens = max_tokens or self.config.max_tokens
-        temperature = temperature or self.config.temperature
-        timeout = timeout or self.config.timeout
+        max_tokens = self.config.max_tokens if max_tokens is None else max_tokens
+        temperature = self.config.temperature if temperature is None else temperature
+        timeout = self.config.timeout if timeout is None else timeout
         model = model_override or self.config.model
         
         try:
             if self.provider == "openai":
                 response = await asyncio.wait_for(
-                    self._call_openai(system_prompt, user_prompt, max_tokens, temperature, model),
+                    self._call_openai(system_prompt, user_prompt, max_tokens, temperature, model, response_format),
                     timeout=timeout
                 )
             elif self.provider == "anthropic":
+                if response_format:
+                    logger.warning("response_format is not supported by Anthropic API — will be ignored")
                 response = await asyncio.wait_for(
-                    self._call_anthropic(system_prompt, user_prompt, max_tokens, temperature),
+                    self._call_anthropic(system_prompt, user_prompt, max_tokens, temperature, model),
                     timeout=timeout
                 )
             else:
@@ -106,18 +110,24 @@ class LLMService:
         user_prompt: str,
         max_tokens: int,
         temperature: float,
-        model: str
+        model: str,
+        response_format: Optional[dict] = None
     ) -> str:
         """Call OpenAI API."""
-        response = await self.client.chat.completions.create(
-            model=model,
-            messages=[
+        kwargs = {
+            "model": model,
+            "messages": [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt}
             ],
-            max_tokens=max_tokens,
-            temperature=temperature
-        )
+            "max_tokens": max_tokens,
+            "temperature": temperature
+        }
+        
+        if response_format:
+            kwargs["response_format"] = response_format
+        
+        response = await self.client.chat.completions.create(**kwargs)
         
         return response.choices[0].message.content.strip()
 
@@ -126,11 +136,12 @@ class LLMService:
         system_prompt: str,
         user_prompt: str,
         max_tokens: int,
-        temperature: float
+        temperature: float,
+        model: str
     ) -> str:
         """Call Anthropic API."""
         response = await self.client.messages.create(
-            model=self.config.model,
+            model=model,
             system=system_prompt,
             messages=[
                 {"role": "user", "content": user_prompt}

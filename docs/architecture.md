@@ -234,7 +234,7 @@ ExperienceOrchestrator (main coordinator)
 
 ## Key Features Implemented
 
-✓ Complete state machine with 13 states
+✓ Complete state machine with 14 states
 ✓ 5 trial agents with distinct roles
 ✓ 8-juror system with 3 personas
 ✓ Evidence board with timeline

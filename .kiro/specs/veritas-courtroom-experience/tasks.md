@@ -2,7 +2,27 @@
 
 ## Overview
 
-This implementation plan breaks down the VERITAS interactive courtroom experience into discrete, testable coding tasks. The system will be built in Python, following the architecture defined in the design document. Implementation follows a bottom-up approach: core data models and validation first, then state management, agent orchestration, and finally integration with Luffa platform components.
+This implementation plan breaks down the VERITAS interactive courtroom experience into discrete, testable coding tasks. The system is built in Python using Pydantic for data models, FastAPI for the API layer, and integrates with OpenAI/Anthropic LLMs for AI agent responses and Luffa Bot API for platform integration.
+
+**Current Implementation Status**: Core architecture is complete with all major components implemented. The system includes:
+- Complete data models with Pydantic validation
+- State machine with sequential progression enforcement
+- Case manager with JSON loading and validation
+- Trial orchestrator with 5 AI agents (Clerk, Prosecution, Defence, Fact Checker, Judge)
+- Jury orchestrator with 8-juror system (3 active AI, 4 lightweight AI, 1 human)
+- Reasoning evaluator with evidence tracking and fallacy detection
+- Dual reveal system assembling verdict, truth, reasoning, and juror reveals
+- Error handling with graceful degradation and fallback responses
+- Luffa Bot integration with polling-based message handling
+- FastAPI REST endpoints and WebSocket support
+- Complete orchestrator wiring all components together
+
+**Remaining Work**: The tasks below reflect refinements, enhancements, and optional property-based testing. All core functionality is operational. Focus areas for refinement include:
+- Enhanced LLM prompt engineering for more realistic agent responses
+- Property-based test coverage (40 properties defined, implementation optional)
+- Luffa Bot integration testing and production deployment
+- Performance optimization and load testing
+- Additional case content creation beyond Blackthorn Hall
 
 The plan includes 40 property-based tests (minimum 100 iterations each) mapped to the correctness properties in the design document, plus unit tests for specific examples and edge cases. Testing tasks are marked as optional with "*" to allow for faster MVP iteration.
 
@@ -38,7 +58,7 @@ The plan includes 40 property-based tests (minimum 100 iterations each) mapped t
 
 - [x] 2. Implement state machine and experience flow
   - [x] 2.1 Create ExperienceState enum and state machine core
-    - Define 13 experience states (NOT_STARTED through COMPLETED)
+    - Define 14 experience states (NOT_STARTED through COMPLETED)
     - Implement StateMachine class with state tracking
     - Add state transition validation logic
     - Implement timing tracking per state
@@ -535,3 +555,345 @@ The plan includes 40 property-based tests (minimum 100 iterations each) mapped t
 - Luffa platform integration (Bot, SuperBox, Channel) assumes existing APIs
 - Case content stored as JSON files with potential migration to database later
 - WebSocket used for real-time trial updates and deliberation
+
+
+## Refinement and Enhancement Tasks
+
+### Phase 21: LLM Integration Enhancements
+
+- [x] 21. Enhance AI agent prompt engineering and response quality
+  - [x] 21.1 Refine prosecution agent prompts for more compelling arguments
+    - Review current prosecution prompts in trial_orchestrator.py
+    - Add case-specific argumentation strategies
+    - Test with multiple case scenarios
+    - _Requirements: 5.1, 19.1, 19.2_
+
+  - [x] 21.2 Refine defence agent prompts for stronger reasonable doubt creation
+    - Review current defence prompts in trial_orchestrator.py
+    - Add defensive strategies and alternative interpretations
+    - Test with multiple case scenarios
+    - _Requirements: 5.1, 19.1, 19.2_
+
+  - [x] 21.3 Enhance juror persona prompts for more realistic deliberation
+    - Review Evidence Purist, Sympathetic Doubter, Moral Absolutist prompts
+    - Add more nuanced personality traits and reasoning patterns
+    - Test deliberation dynamics with enhanced prompts
+    - _Requirements: 8.1, 8.2, 19.2_
+
+  - [x] 21.4 Implement dynamic prompt adjustment based on case complexity
+    - Analyze case content to determine complexity level
+    - Adjust agent verbosity and argumentation depth accordingly
+    - Ensure character limits still enforced
+    - _Requirements: 19.3, 19.4_
+
+  - [x] 21.5 Add fact checker LLM-based contradiction detection
+    - Replace placeholder fact checking with LLM analysis
+    - Compare agent statements against case evidence using LLM
+    - Implement confidence threshold for interventions
+    - _Requirements: 6.1, 6.2_
+
+### Phase 22: Luffa Bot Production Integration
+
+- [ ] 22. Complete Luffa Bot API integration for production use
+  - [x] 22.1 Implement message polling loop in orchestrator
+    - Add background task for polling /receive endpoint every 1 second
+    - Parse incoming messages and route to appropriate handlers
+    - Implement message deduplication by msgId
+    - _Requirements: 13.1, 13.2, 13.4_
+
+  - [x] 22.2 Create command handlers for user interactions
+    - Implement /start command to begin experience
+    - Implement /vote command to submit verdict
+    - Implement /help command for procedural questions
+    - Add error handling for invalid commands
+    - _Requirements: 13.4_
+
+  - [x] 22.3 Implement group message broadcasting for trial stages
+    - Send stage announcements to group when state transitions
+    - Include visual formatting with emojis and structure
+    - Add buttons for user actions (vote, continue, etc.)
+    - _Requirements: 13.2, 13.3_
+
+  - [x] 22.4 Add session management tied to Luffa user IDs
+    - Map Luffa uid to session_id
+    - Support multiple concurrent users in same group
+    - Handle session recovery for disconnected users
+    - _Requirements: 2.4_
+
+  - [ ] 22.5 Test end-to-end flow with real Luffa Bot
+    - Deploy bot to Luffa platform
+    - Test complete experience flow in group chat
+    - Verify message delivery and timing
+    - Test error recovery scenarios
+    - _Requirements: All Luffa integration requirements_
+
+### Phase 23: Additional Case Content Creation
+
+- [ ] 23. Create additional case content beyond Blackthorn Hall
+  - [ ] 23.1 Design second case with different crime type
+    - Choose crime type (e.g., fraud, assault, conspiracy)
+    - Create narrative with victim, defendant, witnesses
+    - Design 5-7 evidence items with timeline
+    - Set ground truth supporting both verdicts
+    - _Requirements: 1.1, 1.2, 1.3, 1.4, 1.5, 16.1-16.5_
+
+  - [ ] 23.2 Implement case content validation tool
+    - Create CLI tool to validate case JSON files
+    - Check all required fields present
+    - Verify evidence count constraints
+    - Validate timeline consistency
+    - _Requirements: 1.2, 1.4, 1.5_
+
+  - [ ] 23.3 Create case content authoring guidelines
+    - Document structure and requirements
+    - Provide examples of effective evidence items
+    - Guidelines for creating ambiguous cases
+    - Tips for balancing prosecution and defence
+    - _Requirements: 16.1-16.5_
+
+### Phase 24: Performance and Scalability
+
+- [ ] 24. Optimize performance for production deployment
+  - [ ] 24.1 Implement connection pooling for LLM API calls
+    - Use aiohttp session pooling
+    - Configure appropriate timeout and retry settings
+    - Add rate limiting to prevent API quota exhaustion
+    - _Requirements: 20.1_
+
+  - [ ] 24.2 Add caching for agent responses
+    - Cache common fallback responses
+    - Cache case content after first load
+    - Implement TTL-based cache invalidation
+    - _Requirements: 19.1, 20.1_
+
+  - [ ] 24.3 Optimize state persistence for high concurrency
+    - Implement async file I/O for session storage
+    - Add database backend option (PostgreSQL/MongoDB)
+    - Batch write operations where possible
+    - _Requirements: 2.4_
+
+  - [ ] 24.4 Add performance monitoring and metrics
+    - Track agent response times by role and stage
+    - Monitor state transition latency
+    - Track reasoning evaluation duration
+    - Log session completion rates
+    - _Requirements: All requirements_
+
+  - [ ] 24.5 Load test with concurrent users
+    - Simulate 10+ concurrent sessions
+    - Measure response times under load
+    - Identify bottlenecks and optimize
+    - Verify error handling under stress
+    - _Requirements: All requirements_
+
+### Phase 25: User Experience Enhancements
+
+- [ ] 25. Enhance user experience and accessibility
+  - [ ] 25.1 Add progress indicators with time estimates
+    - Show estimated time remaining for each stage
+    - Display progress bar or percentage
+    - Warn user when approaching time limits
+    - _Requirements: 18.5, 2.5_
+
+  - [ ] 25.2 Implement pause/resume functionality
+    - Allow user to pause between stages
+    - Enforce 2-minute pause limit
+    - Save state during pause
+    - Resume from exact position
+    - _Requirements: 18.3_
+
+  - [ ] 25.3 Add evidence board search and filtering UI
+    - Implement keyword search across evidence
+    - Add filters by evidence type
+    - Sort by timestamp or relevance
+    - Highlight search matches
+    - _Requirements: 4.1, 4.4, 4.5_
+
+  - [ ] 25.4 Create tutorial/onboarding flow
+    - Brief introduction to courtroom roles
+    - Explanation of deliberation process
+    - Guide to evidence board usage
+    - Practice voting interface
+    - _Requirements: 13.1_
+
+  - [ ] 25.5 Add accessibility features
+    - Screen reader support for all content
+    - Keyboard navigation for all interactions
+    - High contrast mode option
+    - Adjustable text size
+    - _Requirements: All requirements_
+
+### Phase 26: Analytics and Insights
+
+- [ ] 26. Implement analytics for experience insights
+  - [ ] 26.1 Track user reasoning patterns
+    - Analyze which evidence items users reference most
+    - Identify common logical fallacies by case
+    - Track reasoning quality distribution
+    - _Requirements: 11.1, 11.2, 11.3_
+
+  - [ ] 26.2 Analyze verdict distributions by case
+    - Track guilty vs not guilty percentages
+    - Compare user verdicts to ground truth
+    - Identify cases with highest disagreement
+    - _Requirements: 15.3, 15.4_
+
+  - [ ] 26.3 Monitor AI agent performance
+    - Track fallback usage rates by agent
+    - Measure response quality (manual review)
+    - Identify agents needing prompt improvements
+    - _Requirements: 19.1, 19.2, 20.1_
+
+  - [ ] 26.4 Create admin dashboard for insights
+    - Display aggregate statistics
+    - Show session completion rates
+    - Visualize reasoning quality trends
+    - Export data for analysis
+    - _Requirements: All requirements_
+
+### Phase 27: Documentation and Deployment
+
+- [ ] 27. Complete documentation and deployment preparation
+  - [ ] 27.1 Write API documentation
+    - Document all REST endpoints
+    - Document WebSocket message formats
+    - Provide example requests and responses
+    - Include error codes and handling
+    - _Requirements: All API requirements_
+
+  - [ ] 27.2 Create deployment guide
+    - Document environment variables
+    - Provide Docker configuration
+    - Include database setup instructions
+    - Document Luffa Bot registration process
+    - _Requirements: All requirements_
+
+  - [ ] 27.3 Write operator manual
+    - Guide for monitoring system health
+    - Troubleshooting common issues
+    - Instructions for adding new cases
+    - Backup and recovery procedures
+    - _Requirements: All requirements_
+
+  - [ ] 27.4 Create user guide
+    - Explain experience flow
+    - Provide tips for effective deliberation
+    - Explain reasoning evaluation criteria
+    - FAQ section
+    - _Requirements: All requirements_
+
+## Implementation Notes
+
+### Current System Architecture
+
+The VERITAS system is fully implemented with the following architecture:
+
+**Core Components**:
+- `models.py`: Pydantic data models with validation
+- `state_machine.py`: Experience flow controller with sequential progression
+- `session.py`: User session management with 24-hour retention
+- `case_manager.py`: Case content loading and validation
+
+**Agent Orchestration**:
+- `trial_orchestrator.py`: 5 trial agents with LLM integration
+- `jury_orchestrator.py`: 8-juror system with persona-based AI
+- `reasoning_evaluator.py`: Evidence tracking and fallacy detection
+- `dual_reveal.py`: Verdict and reasoning assessment assembly
+
+**Platform Integration**:
+- `luffa_integration.py`: Luffa Bot, SuperBox, and Channel interfaces
+- `luffa_client.py`: Polling-based Luffa Bot API client
+- `llm_service.py`: OpenAI/Anthropic LLM integration with fallbacks
+- `error_handling.py`: Graceful degradation and recovery
+
+**API Layer**:
+- `api.py`: FastAPI REST endpoints and WebSocket support
+- `orchestrator.py`: Main orchestrator wiring all components
+
+**Supporting Components**:
+- `evidence_board.py`: Timeline rendering and evidence access
+- `trial_stages.py`: Stage content and timing management
+- `config.py`: Environment-based configuration
+
+### Technology Stack
+
+- **Language**: Python 3.11+
+- **Data Validation**: Pydantic v2
+- **API Framework**: FastAPI with WebSocket support
+- **LLM Integration**: OpenAI (gpt-4o, gpt-4o-mini) or Anthropic (Claude)
+- **Async Runtime**: asyncio with aiohttp
+- **Testing**: pytest with Hypothesis for property-based tests
+- **Storage**: JSON files (with database migration path)
+- **Platform**: Luffa Bot API (polling-based)
+
+### Configuration
+
+The system uses environment variables for configuration:
+
+```bash
+# LLM Configuration
+LLM_PROVIDER=openai  # or anthropic
+OPENAI_API_KEY=sk-...
+LLM_MODEL=gpt-4o
+LLM_TEMPERATURE=0.7
+LLM_MAX_TOKENS=2000
+LLM_TIMEOUT=30
+
+# Luffa Bot Configuration
+LUFFA_BOT_SECRET=your-bot-secret
+LUFFA_BOT_ENABLED=true
+LUFFA_API_URL=https://apibot.luffa.im/robot
+
+# Application Configuration
+SESSION_TIMEOUT_HOURS=24
+MAX_EXPERIENCE_MINUTES=20
+```
+
+### Running the System
+
+**Interactive Demo**:
+```bash
+python src/main.py
+```
+
+**API Server**:
+```bash
+python src/api.py
+# or
+uvicorn src.api:app --reload
+```
+
+**Luffa Bot Service** (when implemented):
+```bash
+python src/luffa_bot_service.py
+```
+
+### Next Steps for Implementation
+
+1. **Immediate Priority**: Complete Luffa Bot integration (Phase 22) for production deployment
+2. **High Priority**: Enhance LLM prompts (Phase 21) for better agent responses
+3. **Medium Priority**: Add performance optimizations (Phase 24) for scalability
+4. **Lower Priority**: Create additional case content (Phase 23) and analytics (Phase 26)
+5. **Optional**: Implement property-based tests (Tasks 1.3-20.7) for comprehensive validation
+
+### Testing Strategy
+
+**Unit Tests**: Focus on specific examples and edge cases
+- Run with: `pytest tests/unit/`
+- Coverage: Core functionality, integration points, error conditions
+
+**Property-Based Tests**: Verify universal properties (optional)
+- Run with: `pytest tests/property/`
+- Minimum 100 iterations per property
+- 40 properties defined in design document
+
+**Integration Tests**: End-to-end flow validation
+- Test complete experience from start to completion
+- Verify component coordination
+- Test error recovery scenarios
+
+**Manual Testing**: User experience validation
+- Test with real Luffa Bot in group chat
+- Verify timing and pacing feel natural
+- Assess AI agent response quality
+- Evaluate reasoning feedback clarity

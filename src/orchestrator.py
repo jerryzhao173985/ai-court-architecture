@@ -79,6 +79,11 @@ class ExperienceOrchestrator:
         self.superbox: Optional[SuperBox] = None
         self.luffa_channel: Optional[LuffaChannel] = None
         self.state_preservation: Optional[StatePreservation] = None
+        
+        # Message polling state
+        self._polling_task: Optional[asyncio.Task] = None
+        self._polling_active = False
+        self._message_handlers = {}
 
     async def initialize(self) -> dict:
         """
@@ -244,6 +249,29 @@ class ExperienceOrchestrator:
         
         except Exception as e:
             return self._handle_error("advance_trial_stage", e)
+    
+    async def broadcast_stage_to_group(self, group_id: str) -> dict:
+        """
+        Broadcast current stage announcement to group with formatting and buttons.
+        
+        Args:
+            group_id: Group ID to broadcast to
+            
+        Returns:
+            Broadcast result
+        """
+        if not self.state_machine or not self.luffa_bot:
+            return {"success": False, "error": "Not initialized"}
+        
+        try:
+            result = await self.luffa_bot.broadcast_stage_to_group(
+                group_id=group_id,
+                stage=self.state_machine.current_state
+            )
+            return result
+        
+        except Exception as e:
+            return self._handle_error("broadcast_stage_to_group", e)
 
     async def submit_deliberation_statement(self, statement: str, 
                                            evidence_refs: list[str] = None) -> dict:
@@ -298,6 +326,7 @@ class ExperienceOrchestrator:
         Returns:
             Vote result with verdict
         """
+        vote_result = None
         try:
             # Collect votes from all jurors
             vote_result = await self.jury_orchestrator.collect_votes(vote)
@@ -339,17 +368,15 @@ class ExperienceOrchestrator:
         
         except Exception as e:
             # Handle reasoning evaluation failure gracefully
-            if "reasoning" in str(e).lower():
+            if "reasoning" in str(e).lower() and vote_result is not None:
                 fallback = self.error_handler.handle_reasoning_evaluation_failure()
-                # Continue without reasoning assessment
-                vote_result = await self.jury_orchestrator.collect_votes(vote)
                 return {
                     "success": True,
                     "verdict": vote_result.model_dump(by_alias=True),
                     "reasoning_unavailable": True,
                     "fallback": fallback.model_dump(by_alias=True)
                 }
-            
+
             return self._handle_error("submit_vote", e)
 
     async def complete_experience(self, share_verdict: bool = False) -> dict:
@@ -426,7 +453,11 @@ class ExperienceOrchestrator:
     def _save_progress(self) -> None:
         """Save current progress to persistent storage."""
         try:
-            if self.state_preservation:
+            if self.state_preservation and self.state_machine and self.user_session:
+                # Sync state machine data to session before saving
+                self.user_session.current_state = self.state_machine.current_state
+                self.user_session.state_history = self.state_machine.state_history
+                self.user_session.progress.completed_stages = self.state_machine.get_completed_states()
                 self.state_preservation.auto_save(self.user_session)
         except Exception as e:
             self.error_handler.log_error(
@@ -459,3 +490,359 @@ class ExperienceOrchestrator:
             "error": str(error),
             "operation": operation
         }
+
+    # ========================================================================
+    # Message Polling Loop (Task 22.1)
+    # ========================================================================
+
+    async def start_message_polling(self) -> None:
+        """
+        Start background task for polling Luffa Bot messages.
+        
+        Polls /receive endpoint every 1 second, parses incoming messages,
+        routes to appropriate handlers, and implements message deduplication.
+        
+        Requirements: 13.1, 13.2, 13.4
+        """
+        if self._polling_active:
+            logger.warning("Message polling already active")
+            return
+        
+        if not self.luffa_client:
+            logger.warning("Luffa client not initialized, cannot start polling")
+            return
+        
+        self._polling_active = True
+        self._polling_task = asyncio.create_task(self._polling_loop())
+        logger.info("Started message polling loop")
+
+    async def stop_message_polling(self) -> None:
+        """Stop the message polling background task."""
+        if not self._polling_active:
+            return
+        
+        self._polling_active = False
+        
+        if self._polling_task:
+            self._polling_task.cancel()
+            try:
+                await self._polling_task
+            except asyncio.CancelledError:
+                pass
+            self._polling_task = None
+        
+        logger.info("Stopped message polling loop")
+
+    async def _polling_loop(self) -> None:
+        """
+        Internal polling loop that runs every 1 second.
+        
+        Continuously polls for messages, parses them, and routes to handlers.
+        Message deduplication is handled by the LuffaAPIClient.
+        """
+        logger.info("Polling loop started - checking for messages every 1 second")
+        
+        while self._polling_active:
+            try:
+                # Poll for new messages (deduplication handled in client)
+                messages = await self.luffa_client.receive_messages()
+                
+                # Process each message
+                for msg in messages:
+                    await self._route_message(msg)
+                
+                # Wait 1 second before next poll
+                await asyncio.sleep(1)
+            
+            except asyncio.CancelledError:
+                logger.info("Polling loop cancelled")
+                break
+            
+            except Exception as e:
+                logger.error(f"Error in polling loop: {e}")
+                # Back off on error to avoid tight error loops
+                await asyncio.sleep(5)
+
+    async def _route_message(self, msg: dict) -> None:
+        """
+        Route incoming message to appropriate handler.
+        
+        Args:
+            msg: Parsed message object with fields:
+                - uid: Sender or group ID
+                - type: 0=DM, 1=Group
+                - text: Message text
+                - msgId: Message ID (already deduplicated)
+                - sender_uid: Only in group messages
+                - atList: List of mentioned users
+                - urlLink: Optional URL link
+        """
+        text = msg.get("text", "").strip()
+        uid = msg.get("uid")
+        msg_type = msg.get("type")
+        
+        if not text or uid is None:
+            return
+        
+        # Check if this is a command (starts with /)
+        if text.startswith("/"):
+            await self._handle_command_message(msg)
+        else:
+            # Regular message - check if we have a handler registered
+            handler = self._message_handlers.get(uid)
+            if handler:
+                await handler(msg)
+            else:
+                # Default: treat as deliberation statement if in deliberation state
+                if self.state_machine and self.state_machine.current_state == ExperienceState.JURY_DELIBERATION:
+                    await self._handle_deliberation_message(msg)
+
+    async def _handle_command_message(self, msg: dict) -> None:
+        """
+        Handle command messages (starting with /).
+        
+        Args:
+            msg: Message object
+        """
+        text = msg.get("text", "").strip()
+        uid = msg.get("uid")
+        
+        # Extract command and arguments
+        parts = text.split()
+        command = parts[0].lower()
+        args = parts[1:] if len(parts) > 1 else []
+        
+        # Route to appropriate command handler
+        if command == "/start":
+            await self._handle_start_command(uid, msg)
+        elif command == "/continue":
+            await self._handle_continue_command(uid, msg)
+        elif command == "/vote":
+            vote = args[0] if args else None
+            await self._handle_vote_command(uid, vote, msg)
+        elif command == "/evidence":
+            await self._handle_evidence_command(uid, msg)
+        elif command == "/status":
+            await self._handle_status_command(uid, msg)
+        elif command == "/help":
+            await self._handle_help_command(uid, msg)
+        else:
+            # Unknown command
+            await self._send_message(uid, msg.get("type"), f"Unknown command: {command}. Type /help for available commands.")
+
+    async def _handle_deliberation_message(self, msg: dict) -> None:
+        """
+        Handle deliberation statement from user.
+        
+        Args:
+            msg: Message object
+        """
+        text = msg.get("text", "").strip()
+        
+        if not text:
+            return
+        
+        # Submit deliberation statement
+        result = await self.submit_deliberation_statement(text)
+        
+        if result["success"]:
+            # Send AI juror responses back
+            uid = msg.get("uid")
+            msg_type = msg.get("type")
+            
+            for turn in result["turns"][1:]:  # Skip user's own turn
+                juror_statement = turn["statement"]
+                await self._send_message(uid, msg_type, f"🗣️ AI Juror: {juror_statement}")
+            
+            # Check if deliberation ended
+            if result.get("deliberation_ended"):
+                await self._send_message(uid, msg_type, "⏰ Deliberation time is up! Type /vote guilty or /vote not_guilty")
+
+    async def _handle_start_command(self, uid: str, msg: dict) -> None:
+        """Handle /start command."""
+        # Initialize if not already done
+        if not self.case_content:
+            init_result = await self.initialize()
+            if not init_result["success"]:
+                await self._send_message(uid, msg.get("type"), f"❌ Failed to start: {init_result.get('error')}")
+                return
+        
+        # Start experience
+        start_result = await self.start_experience()
+        
+        if start_result["success"]:
+            hook_content = start_result["hook_content"]["content"]
+            
+            # Broadcast to group if this is a group message
+            if msg.get("type") == 1:  # Group message
+                await self.broadcast_stage_to_group(uid)
+                await self._send_message(uid, msg.get("type"), f"\n{hook_content}")
+            else:
+                # Send to DM
+                await self._send_message(uid, msg.get("type"), f"🎭 THE TRIAL BEGINS\n\n{hook_content}")
+                await self._send_message(uid, msg.get("type"), "Type /continue to proceed.")
+        else:
+            await self._send_message(uid, msg.get("type"), f"❌ Error: {start_result.get('error')}")
+
+    async def _handle_continue_command(self, uid: str, msg: dict) -> None:
+        """Handle /continue command."""
+        if not self.state_machine:
+            await self._send_message(uid, msg.get("type"), "⚠️ No active trial. Use /start to begin.")
+            return
+        
+        # Advance to next stage
+        result = await self.advance_trial_stage()
+        
+        if result["success"]:
+            # Broadcast stage announcement to group if this is a group message
+            if msg.get("type") == 1:  # Group message
+                await self.broadcast_stage_to_group(uid)
+            else:
+                # Send announcement to DM
+                announcement = result["announcement"]["content"]
+                await self._send_message(uid, msg.get("type"), f"📢 {announcement}")
+            
+            # Send agent responses if any
+            if "agent_responses" in result:
+                for response in result["agent_responses"]:
+                    role = response["agentRole"].upper()
+                    content = response["content"]
+                    await self._send_message(uid, msg.get("type"), f"🎭 [{role}]\n\n{content}")
+                    await asyncio.sleep(1)  # Pace messages
+            
+            # Handle deliberation start
+            if "deliberation_prompt" in result:
+                prompt = result["deliberation_prompt"]
+                await self._send_message(uid, msg.get("type"), f"⚖️ JURY DELIBERATION\n\n{prompt}\n\nShare your thoughts or type /evidence to view evidence.")
+        else:
+            await self._send_message(uid, msg.get("type"), f"❌ Error: {result.get('error')}")
+
+    async def _handle_vote_command(self, uid: str, vote: Optional[str], msg: dict) -> None:
+        """Handle /vote command."""
+        if not vote or vote not in ["guilty", "not_guilty"]:
+            await self._send_message(uid, msg.get("type"), "⚠️ Invalid vote. Use: /vote guilty OR /vote not_guilty")
+            return
+        
+        # Submit vote
+        await self._send_message(uid, msg.get("type"), "🗳️ Collecting votes from all jurors...")
+        
+        vote_result = await self.submit_vote(vote)
+        
+        if vote_result["success"]:
+            # Send dual reveal
+            dual_reveal = vote_result["dual_reveal"]
+            
+            # 1. Verdict
+            verdict = dual_reveal["verdict"]
+            verdict_text = verdict["verdict"].replace("_", " ").upper()
+            await self._send_message(uid, msg.get("type"), 
+                f"⚖️ THE VERDICT\n\nThe jury finds the defendant: {verdict_text}\n\nVote: {verdict['guiltyCount']} guilty, {verdict['notGuiltyCount']} not guilty")
+            await asyncio.sleep(2)
+            
+            # 2. Ground truth
+            truth = dual_reveal["groundTruth"]
+            actual = truth["actualVerdict"].replace("_", " ").upper()
+            await self._send_message(uid, msg.get("type"),
+                f"🔍 THE TRUTH\n\nActual verdict: {actual}\n\n{truth['explanation']}")
+            await asyncio.sleep(2)
+            
+            # 3. Reasoning assessment
+            assessment = dual_reveal["reasoningAssessment"]
+            category = assessment["category"].replace("_", " ").title()
+            await self._send_message(uid, msg.get("type"),
+                f"📊 REASONING ASSESSMENT\n\nCategory: {category}\nEvidence Score: {assessment['evidenceScore']:.2f}/1.0\nCoherence Score: {assessment['coherenceScore']:.2f}/1.0\n\n{assessment['feedback']}")
+            
+            await self._send_message(uid, msg.get("type"), "✅ Trial complete! Type /start to begin a new trial.")
+        else:
+            await self._send_message(uid, msg.get("type"), f"❌ Error: {vote_result.get('error')}")
+
+    async def _handle_evidence_command(self, uid: str, msg: dict) -> None:
+        """Handle /evidence command."""
+        evidence_board = self.get_evidence_board()
+        
+        if "error" in evidence_board:
+            await self._send_message(uid, msg.get("type"), "⚠️ Evidence board not available.")
+            return
+        
+        text = "📋 EVIDENCE BOARD\n\n"
+        for item in evidence_board["timeline"]:
+            text += f"• {item['title']} ({item['type']})\n  {item['timestamp']}\n\n"
+        
+        await self._send_message(uid, msg.get("type"), text)
+
+    async def _handle_status_command(self, uid: str, msg: dict) -> None:
+        """Handle /status command."""
+        progress = self.get_progress()
+        
+        if "error" in progress:
+            await self._send_message(uid, msg.get("type"), "⚠️ No active trial.")
+            return
+        
+        current = progress["currentStage"].replace("_", " ").title()
+        text = f"📊 TRIAL STATUS\n\nCurrent Stage: {current}\nProgress: {progress['completedStages']}/{progress['totalStages']} stages"
+        
+        await self._send_message(uid, msg.get("type"), text)
+
+    async def _handle_help_command(self, uid: str, msg: dict) -> None:
+        """Handle /help command."""
+        help_text = """🎭 VERITAS COURTROOM EXPERIENCE
+
+Commands:
+/start - Begin a new trial
+/continue - Advance to next stage
+/vote guilty - Vote guilty
+/vote not_guilty - Vote not guilty
+/evidence - View evidence board
+/status - Check trial progress
+/help - Show this help
+
+How it works:
+1. Start a trial with /start
+2. AI agents play courtroom roles
+3. Watch the trial unfold
+4. Deliberate with AI jurors
+5. Cast your vote
+6. See the dual reveal"""
+        
+        await self._send_message(uid, msg.get("type"), help_text)
+
+    async def _send_message(self, uid: str, msg_type: int, text: str) -> None:
+        """
+        Send message via Luffa Bot.
+        
+        Args:
+            uid: User or group ID
+            msg_type: 0=DM, 1=Group
+            text: Message text
+        """
+        if not self.luffa_client:
+            logger.warning("Cannot send message - Luffa client not initialized")
+            return
+        
+        try:
+            if msg_type == 1:  # Group
+                await self.luffa_client.send_group_message(uid, text)
+            else:  # DM
+                await self.luffa_client.send_dm(uid, text)
+        except Exception as e:
+            logger.error(f"Failed to send message: {e}")
+
+    def register_message_handler(self, uid: str, handler) -> None:
+        """
+        Register a custom message handler for a specific user/group.
+        
+        Args:
+            uid: User or group ID
+            handler: Async function that takes a message dict
+        """
+        self._message_handlers[uid] = handler
+
+    def unregister_message_handler(self, uid: str) -> None:
+        """
+        Unregister message handler for a user/group.
+        
+        Args:
+            uid: User or group ID
+        """
+        if uid in self._message_handlers:
+            del self._message_handlers[uid]

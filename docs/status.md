@@ -30,7 +30,7 @@
 ## System Components
 
 ### ✅ Core Components
-- **State Machine**: Manages 13 trial stages with validation
+- **State Machine**: Manages 14 experience states with validation
 - **Session Management**: Persistent storage with expiry handling
 - **Case Manager**: Loads case content from JSON fixtures
 - **Evidence Board**: Timeline visualization with highlighting
@@ -261,7 +261,7 @@ python src/main.py
         ▼                     ▼                     ▼
 ┌──────────────┐    ┌──────────────┐    ┌──────────────┐
 │ State Machine│    │ LLM Service  │    │ Luffa Client │
-│ (13 stages)  │    │ (OpenAI API) │    │ (Bot API)    │
+│ (14 states)  │    │ (OpenAI API) │    │ (Bot API)    │
 └──────────────┘    └──────────────┘    └──────────────┘
         │                     │                     │
         ▼                     ▼                     ▼
