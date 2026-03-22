@@ -1,6 +1,10 @@
+<p align="center">
+  <img src="VERITAS.png" alt="VERITAS — Where AI Argues. You Decide. Truth Prevails." width="800">
+</p>
+
 # VERITAS — AI Courtroom Experience
 
-Interactive 15-minute British Crown Court murder trial. Five AI agents perform the trial, you deliberate with 7 AI jurors, vote on a verdict, then a four-part reveal compares your reasoning against the truth.
+Interactive 15-minute British Crown Court criminal trial. Up to 10 AI agents perform the trial — barristers, witnesses, the defendant, a fact checker, and a judge — while you deliberate with AI jurors, vote on a verdict, then a four-part reveal compares your reasoning against the truth.
 
 Runs as a **CLI experience**, **REST/WebSocket API**, or **Luffa group chat bot**.
 
