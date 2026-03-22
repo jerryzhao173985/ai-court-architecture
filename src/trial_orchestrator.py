@@ -192,7 +192,12 @@ Be concise, formal, and authoritative."""
 
     def _get_prosecution_prompt(self, case_content: CaseContent) -> str:
         """Generate system prompt for prosecution agent."""
-        evidence_summary = "\n".join([f"- {e.title}: {e.description}" for e in case_content.evidence])
+        prosecution_items = [e for e in case_content.evidence if e.presented_by == "prosecution"]
+        defence_items = [e for e in case_content.evidence if e.presented_by == "defence"]
+        evidence_summary = "YOUR EVIDENCE (prosecution):\n"
+        evidence_summary += "\n".join([f"- {e.title}: {e.description}" for e in prosecution_items])
+        evidence_summary += "\n\nDEFENCE EVIDENCE (be prepared to counter):\n"
+        evidence_summary += "\n".join([f"- {e.title}: {e.description}" for e in defence_items])
         
         # Extract key prosecution evidence for strategic focus
         prosecution_evidence = [e for e in case_content.evidence if e.presented_by == "prosecution"]
@@ -211,7 +216,7 @@ Be concise, formal, and authoritative."""
                 emphasis_section += f"- {item.title}: {item.significance}\n"
             emphasis_section += "\nThese items should be central to your argumentation strategy."
         
-        return f"""You are the Crown Prosecution barrister in a British Crown Court murder trial.
+        return f"""You are the Crown Prosecution barrister in a British Crown Court trial.
 
 Case: {case_content.title}
 Defendant: {case_content.narrative.defendant_profile.name}
@@ -226,19 +231,17 @@ STRATEGIC FOCUS - Your strongest arguments:
 
 Your role is to:
 - Present the case for the Crown with conviction and clarity
-- Build a compelling narrative connecting motive, means, and opportunity
+- Build a compelling narrative that connects the evidence to the defendant's guilt
 - Argue that the defendant is guilty beyond reasonable doubt
-- Use the "trilogy of proof" approach: establish motive, demonstrate means, prove opportunity
-- Reference evidence that supports guilt in a logical sequence
+- Reference YOUR evidence items specifically by name
 - Anticipate and preemptively address defence arguments
-- Cross-examine defence witnesses to expose inconsistencies
-- Deliver compelling opening and closing speeches that tell a coherent story
+- Cross-examine the defendant to expose inconsistencies in their account
 
-ARGUMENTATION STRATEGIES:
-- Opening: Frame the narrative - "This is a case about trust betrayed and greed that led to murder"
+ARGUMENTATION APPROACH:
+- Opening: Frame the narrative around the charge — what happened, who is responsible, and why
 - Evidence presentation: Build your case piece by piece, showing how evidence interconnects
-- Cross-examination: Focus on timeline inconsistencies and access to means
-- Closing: Remind jury of the weight of evidence and that coincidences pile up to proof
+- Cross-examination: Challenge the defendant's account directly — press on contradictions
+- Closing: Remind jury of the weight of evidence and that the standard of proof is met
 
 TONE: Authoritative but not aggressive. Confident but respectful of the court. Let the evidence speak, but guide the jury to see the connections.
 {complexity_guidance}
@@ -276,7 +279,12 @@ CRITICAL: Only reference evidence that has been presented in earlier stages. Do 
 
     def _get_defence_prompt(self, case_content: CaseContent) -> str:
         """Generate system prompt for defence agent."""
-        evidence_summary = "\n".join([f"- {e.title}: {e.description}" for e in case_content.evidence])
+        defence_items = [e for e in case_content.evidence if e.presented_by == "defence"]
+        prosecution_items = [e for e in case_content.evidence if e.presented_by == "prosecution"]
+        evidence_summary = "YOUR EVIDENCE (defence):\n"
+        evidence_summary += "\n".join([f"- {e.title}: {e.description}" for e in defence_items])
+        evidence_summary += "\n\nPROSECUTION EVIDENCE (challenge these):\n"
+        evidence_summary += "\n".join([f"- {e.title}: {e.description}" for e in prosecution_items])
         
         # Extract key defence evidence for strategic focus
         defence_evidence = [e for e in case_content.evidence if e.presented_by == "defence"]
@@ -295,7 +303,7 @@ CRITICAL: Only reference evidence that has been presented in earlier stages. Do 
                 prosecution_focus += f"- {item.title}: {item.significance}\n"
             prosecution_focus += "\nPrepare counter-arguments and alternative interpretations for these items."
         
-        return f"""You are the Defence barrister in a British Crown Court murder trial.
+        return f"""You are the Defence barrister in a British Crown Court trial.
 
 Case: {case_content.title}
 Defendant: {case_content.narrative.defendant_profile.name}
@@ -320,17 +328,15 @@ Your role is to:
 
 DEFENSIVE STRATEGIES:
 - Opening: Frame the case as built on speculation, not facts - "The prosecution will ask you to fill gaps with assumptions"
-- Evidence presentation: Highlight what's missing - "Where are the fingerprints? Where is the direct evidence?"
+- Evidence presentation: Highlight what's missing - "Where is the direct evidence? What hasn't the prosecution proven?"
 - Cross-examination: Attack timeline precision, question witness certainty, offer alternative scenarios
 - Closing: Remind jury of reasonable doubt standard - "If you're not sure, you must acquit"
 
-REASONABLE DOUBT TECHNIQUES:
-1. **Timeline Challenges**: "The prosecution's timeline requires everything to happen in an impossibly tight window"
-2. **Missing Evidence**: "If this really happened as they claim, where is the physical evidence?"
-3. **Alternative Explanations**: "This evidence is equally consistent with [alternative scenario]"
-4. **Witness Credibility**: "Can we really rely on testimony from someone who [bias/uncertainty]?"
-5. **Burden of Proof**: "The prosecution must prove guilt beyond reasonable doubt - they haven't met that burden"
-6. **Presumption of Innocence**: "My client doesn't have to prove innocence - the prosecution must prove guilt"
+KEY PRINCIPLES:
+- The burden of proof is ALWAYS on the prosecution — remind the jury of this
+- "Possible" is not "proven beyond reasonable doubt"
+- Highlight gaps, alternative explanations, and what the prosecution has NOT shown
+- Reference YOUR evidence items that support the defence
 
 TONE: Confident but not dismissive. Respectful of the court but forceful in defending your client. Plant doubt without appearing desperate. Let the gaps in the prosecution's case speak for themselves.
 {complexity_guidance}
@@ -356,18 +362,26 @@ Be concise, neutral, and factual. Only intervene on clear factual errors, not op
         if self.complexity_level:
             complexity_guidance = self.complexity_analyzer.get_complexity_guidance(self.complexity_level)
         
-        return f"""You are the presiding Judge in a British Crown Court murder trial.
+        evidence_summary = "\n".join([f"- {e.title} ({e.presented_by})" for e in case_content.evidence])
+
+        return f"""You are the presiding Judge in a British Crown Court trial.
 
 Case: {case_content.title}
+Charge: {case_content.narrative.charge_text}
+Defendant: {case_content.narrative.defendant_profile.name}
+
+Evidence presented:
+{evidence_summary}
 
 Your role is to:
-- Maintain courtroom order
+- Maintain courtroom order and proper procedure
 - Provide legal guidance to the jury
-- Summarize key evidence from both sides fairly
-- Explain burden of proof and reasonable doubt
-- Remain impartial - do not express opinion on verdict
+- During summing up: summarize key evidence from BOTH sides fairly
+- Explain burden of proof and the standard of "beyond reasonable doubt"
+- Remain strictly impartial — do NOT express any opinion on the verdict
+- Use proper judicial language: "Members of the jury...", "You must consider..."
 
-Be authoritative, fair, and clear in your instructions.
+Be authoritative, fair, and measured.
 {complexity_guidance}"""
 
     def _get_witness_prompt(self, case_content: CaseContent, witness_profile, witness_num: int) -> str:
@@ -376,7 +390,6 @@ Be authoritative, fair, and clear in your instructions.
         Witnesses are called by the prosecution to give testimony supporting
         the Crown's case. The defence then cross-examines them.
         """
-        evidence_summary = "\n".join([f"- {e.title}: {e.description}" for e in case_content.evidence])
         facts = "\n".join([f"- {f}" for f in witness_profile.relevant_facts])
 
         return f"""You are {witness_profile.name}, {witness_profile.role}, testifying in a British Crown Court trial.
@@ -384,24 +397,22 @@ Be authoritative, fair, and clear in your instructions.
 Case: {case_content.title}
 Defendant: {case_content.narrative.defendant_profile.name}
 Victim: {case_content.narrative.victim_profile.name}
+Charge: {case_content.narrative.charge_text}
 
 YOUR BACKGROUND:
 {witness_profile.background}
 
-YOUR RELEVANT FACTS (what you know and can testify about):
+WHAT YOU KNOW AND CAN TESTIFY ABOUT:
 {facts}
 
-CASE EVIDENCE (for context):
-{evidence_summary}
+IMPORTANT — You only know what is listed above. You are a {witness_profile.role}, not an investigator or juror. If asked about something outside your knowledge, say "I'm not in a position to comment on that" or "That falls outside my area of expertise."
 
 YOUR ROLE IN COURT:
 - You have been called as a prosecution witness (Witness {witness_num})
-- During EVIDENCE PRESENTATION: The prosecution barrister examines you. Present your testimony clearly — what you saw, found, or analysed. Answer the prosecution's questions to help build their case.
-- During CROSS-EXAMINATION: The defence barrister will challenge your testimony. Answer honestly but defend your observations. The defence will try to create doubt about your findings — respond factually and acknowledge genuine limitations.
-- Stay in character as {witness_profile.name}, {witness_profile.role}
-- Only speak about things you would credibly know given your professional role
-- Be truthful — if you don't know something, say so
-- Do NOT volunteer opinions on guilt or innocence — you are a witness, not a juror
+- During EVIDENCE PRESENTATION: Present your testimony clearly — what you personally saw, found, or analysed
+- During CROSS-EXAMINATION: The defence will challenge you. Answer honestly. Defend your findings where sound, but acknowledge genuine limitations
+- Do NOT volunteer opinions on guilt or innocence
+- Do NOT speculate about things you didn't personally observe or analyse
 
 TONE: Professional, authoritative within your expertise, measured. You are under oath.
 
@@ -541,9 +552,11 @@ Keep responses under 400 words."""
             # --- DEFENCE CROSS-EXAMINES PROSECUTION WITNESSES ---
             # Build context from witness testimony during evidence presentation
             witness_testimony_context = ""
-            for key in ["witness_1", "witness_2"]:
-                if key in self.evidence_testimony:
-                    witness_testimony_context += f"\n{key} testified: \"{self.evidence_testimony[key][:300]}...\"\n"
+            for i, key in enumerate(["witness_1", "witness_2"]):
+                if key in self.evidence_testimony and self.case_content:
+                    profiles = self.case_content.narrative.witness_profiles
+                    name = profiles[i].name if i < len(profiles) else key
+                    witness_testimony_context += f"\n{name} testified: \"{self.evidence_testimony[key][:300]}...\"\n"
 
             defence_response = await self._generate_agent_response(
                 "defence", stage, witness_testimony_context if witness_testimony_context else ""
@@ -631,9 +644,9 @@ Keep responses under 400 words."""
         
         # Generate user prompt based on stage
         user_prompt = self._get_stage_prompt(agent_role, stage)
-        # Add preceding context so witnesses/defendant respond to what was actually said
+        # Add preceding context so agents respond to what was actually said
         if preceding_context:
-            user_prompt = f"The barrister has just said:\n\"{preceding_context[:500]}\"\n\n{user_prompt}"
+            user_prompt = f"Context from the preceding speaker:\n{preceding_context[:500]}\n\n{user_prompt}"
         fallback = self._get_fallback_response(agent_role, stage)
         
         # Use LLM service if available, otherwise use fallback
@@ -780,8 +793,9 @@ Keep responses under 400 words."""
         if not self.llm_service or "judge" not in self.agents:
             return None
 
-        # Summarize last 2 responses as context
-        recent = "\n".join([f"{r.agent_role}: {r.content[:200]}" for r in responses[-2:]])
+        # Summarize last 2 substantive responses (skip clerk announcements)
+        substantive = [r for r in responses if not r.metadata.get("witness_call") and not r.metadata.get("defendant_call")]
+        recent = "\n".join([f"{r.agent_role}: {r.content[:200]}" for r in substantive[-2:]])
 
         try:
             content, _ = await self.llm_service.generate_with_fallback(
@@ -997,7 +1011,7 @@ Consider all the evidence carefully. You may now retire to deliberate."""
                 f"Members of the jury, the prosecution will present a case built on speculation and circumstantial evidence. They will ask you to fill gaps with assumptions. But assumptions are not proof. The burden of proof rests entirely with the prosecution, and they must prove guilt beyond reasonable doubt. As you listen to their case, ask yourself: where is the direct evidence? Where are the witnesses? Where is the proof? The defence will show you that the prosecution's case is built on a foundation of doubt, not certainty.",
             
             ("defence", ExperienceState.EVIDENCE_PRESENTATION):
-                f"The prosecution wants you to believe their theory, but look at what's missing. No fingerprints. No witnesses to the actual act. No direct evidence linking {defendant_name} to this crime. The timeline they propose is impossibly tight. Alternative explanations exist that are equally consistent with the evidence. The absence of evidence is itself evidence - evidence that their theory doesn't hold up to scrutiny.",
+                f"The prosecution wants you to believe their theory, but look at what's missing. Where is the direct evidence linking {defendant_name} to this crime? Alternative explanations exist that are equally consistent with the evidence. The absence of proof is itself significant — it means the prosecution's case does not meet the standard required.",
             
             ("defence", ExperienceState.CROSS_EXAMINATION):
                 "The prosecution's case relies on assumptions and speculation. Can the witnesses really be certain about exact times? Couldn't the evidence be interpreted differently? Where is the proof that connects these dots? The prosecution must prove guilt beyond reasonable doubt, and doubt is exactly what their case creates.",
@@ -1046,6 +1060,34 @@ Consider all the evidence carefully. You may now retire to deliberate."""
                     "Members of the jury, the evidence is overwhelming. Marcus Ashford had a powerful motive - £500,000 and exposure of his fraud. He had the means - access to digoxin in the estate medical cabinet. He had opportunity - alone with Lord Blackthorn during the critical time window. When motive, means, and opportunity align with presence at the scene, that is not reasonable doubt - that is proof beyond reasonable doubt. The Crown asks you to return a verdict of guilty.",
             })
         
+        # For Digital Deception specifically, use case-specific fallbacks
+        if self.case_content and "digital-deception" in self.case_content.case_id.lower():
+            fallbacks.update({
+                ("defence", ExperienceState.DEFENCE_OPENING):
+                    "Members of the jury, the prosecution will tell you that Sarah Chen's credentials were used to steal £2.3 million. That much is true. But using someone's credentials is not the same as that person committing the crime. We will show you that sophisticated malware was found on her workstation — malware that steals exactly the kind of credentials used here. We will show you that the stolen funds were accessed from Eastern Europe, never from the UK. And we will show you that Sarah Chen herself warned her employer about the exact security vulnerabilities that were exploited. This is not the profile of a criminal. This is the profile of a victim.",
+
+                ("defence", ExperienceState.EVIDENCE_PRESENTATION):
+                    "The prosecution's case rests on one fact: Sarah Chen's credentials were used. But look at the full picture. The SilentVault malware was found on her workstation — installed two weeks before the fraud began. The cryptocurrency account was accessed exclusively from Eastern European IP addresses, never from London. Sarah has no hidden assets, no unusual spending, no trace of £2.3 million anywhere. And crucially, Sarah herself filed multiple security vulnerability reports warning about the exact weaknesses that were exploited. If she planned this fraud, why would she warn her own company about how to prevent it?",
+
+                ("defence", ExperienceState.CROSS_EXAMINATION):
+                    "The prosecution's witnesses cannot explain the malware on Sarah's workstation. The CTO admitted to known security vulnerabilities. The cryptocurrency account was never accessed from the UK. If Sarah Chen masterminded this fraud, she is the most unusual criminal in history — one who left no financial trail, took no money, and warned her employer how to stop the very crime she was supposedly planning. The prosecution asks you to ignore all of this and focus only on whose name appears on a login screen.",
+
+                ("defence", ExperienceState.DEFENCE_CLOSING):
+                    "Members of the jury, the prosecution has proven that Sarah Chen's credentials were used. They have not proven that Sarah Chen used them. The malware explains how. The Eastern European access logs explain where. The missing money explains the motive — or rather, the lack of one. Sarah Chen is not guilty of fraud. She is a victim of it. If you have any doubt — and the evidence demands doubt — you must acquit.",
+
+                ("prosecution", ExperienceState.PROSECUTION_OPENING):
+                    "Members of the jury, this is a case about trust abused and systems exploited from the inside. Sarah Chen held the keys to Meridian Investment Trust's compliance systems. Over eighteen months, £2.3 million was systematically stolen using her credentials — credentials only she possessed. The cryptocurrency account that received the funds was registered with her personal information. The Crown will prove that Sarah Chen exploited her position of trust to commit fraud on a massive scale.",
+
+                ("prosecution", ExperienceState.EVIDENCE_PRESENTATION):
+                    "The evidence is clear. First, the transaction audit trail — every fraudulent transaction was authorized using Sarah Chen's unique compliance override credentials. Second, the cryptocurrency account — registered with her national insurance number, her date of birth, her email address. Third, the IT analysis showing that security logging was disabled from her workstation. Each piece points to an insider who knew exactly how the systems worked — because she was paid to understand them.",
+
+                ("prosecution", ExperienceState.CROSS_EXAMINATION):
+                    "The defence claims malware is responsible. But consider: Sarah Chen had exclusive access to the compliance systems. She had the technical knowledge to exploit them. The cryptocurrency account was registered with her personal information — not information a piece of malware would possess. And the transactions were precisely calibrated to avoid detection thresholds that only a compliance officer would know. These are not the actions of an external hacker. These are the actions of an insider.",
+
+                ("prosecution", ExperienceState.PROSECUTION_CLOSING):
+                    "Members of the jury, the evidence connects Sarah Chen directly to this fraud. Her credentials. Her personal information on the cryptocurrency account. Her technical knowledge of the systems. Her exclusive access. The defence offers malware as an alternative theory, but malware doesn't register cryptocurrency accounts with a person's national insurance number. Sarah Chen abused her position of trust to steal £2.3 million. The Crown asks you to return a verdict of guilty.",
+            })
+
         # Add witness/defendant fallbacks
         fallbacks.update({
             ("witness_1", ExperienceState.EVIDENCE_PRESENTATION):
