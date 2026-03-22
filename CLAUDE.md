@@ -107,9 +107,15 @@ JURY_DELIBERATION → ANONYMOUS_VOTE → DUAL_REVEAL → COMPLETED
 
 ### Multi-Bot Architecture
 
-5 bots (Clerk, Prosecution, Defence, Fact Checker, Judge) each with separate UID/secret in `.env`. The `MultiBotSDKClient` uses direct HTTP calls (not the SDK) because the luffa-bot-python-sdk has a global `robot_key` race condition when managing multiple bots.
+Up to 10 bots with separate UID/secret in `.env`. The `MultiBotSDKClient` uses direct HTTP calls (not the SDK) because the luffa-bot-python-sdk has a global `robot_key` race condition when managing multiple bots.
 
-**Polling**: Every 1 second, polls `/receive` on ALL 5 bots — Luffa delivers group messages to each bot independently. Messages deduplicated by `msgId` (max 5000 tracked). Bot-originated messages filtered by `sender_uid` to prevent echo loops.
+**Trial agents (5)**: Clerk, Prosecution, Defence, Fact Checker, Judge
+**Character bots (3, optional)**: Witness 1, Witness 2 (first 2 witnesses from case data), Defendant
+**Juror bots (2, optional)**: Juror 1 (Evidence Purist), Juror 2 (Sympathetic Doubter)
+
+Witnesses testify during EVIDENCE_PRESENTATION and respond under CROSS_EXAMINATION. Defendant testifies and is cross-examined. If character/juror bots not configured, their messages route through clerk.
+
+**Polling**: Every 1 second, polls `/receive` on ALL configured bots — Luffa delivers group messages to each bot independently. Messages deduplicated by `msgId` (max 5000 tracked). Bot-originated messages filtered by `sender_uid` to prevent echo loops.
 
 ### Jury System
 
@@ -165,7 +171,5 @@ Copy `.env.example` to `.env`. Key groups:
 
 ## Known Limitations & Planned Work
 
-- Only `blackthorn-hall-001` is wired as the default case in `multi_bot_service.py:177` — planned: `/start [case_id]` selection (Phase 26.1)
-- AI juror responses come from clerk bot with generic "AI Juror" label — planned: persona names + juror bots (Phase 25.4)
-- No witness bots yet — planned: 2 interactive witness bots
 - No web frontend — planned: React/Vue UI consuming the FastAPI backend
+- Witness/defendant bots only speak during evidence presentation and cross-examination (2 of 14 stages)

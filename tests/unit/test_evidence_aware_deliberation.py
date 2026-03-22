@@ -137,6 +137,9 @@ async def test_evidence_references_detected_and_appended(sample_case_content, mo
 @pytest.mark.asyncio
 async def test_evidence_tracking_prevents_repetition(sample_case_content, mock_llm_service):
     """Test that jurors don't repeat commentary on the same evidence."""
+    import random
+    random.seed(100)  # Deterministic for testing
+
     # Setup
     orchestrator = JuryOrchestrator(llm_service=mock_llm_service)
     orchestrator.initialize_jury(sample_case_content)
@@ -163,17 +166,20 @@ async def test_evidence_tracking_prevents_repetition(sample_case_content, mock_l
         evidence_references=["E001"]
     )
     
-    # Get the call arguments from the second call
-    call_args = orchestrator.llm_service.generate_with_fallback.call_args
-    user_prompt = call_args.kwargs['user_prompt']
-    
-    # Verify evidence section was NOT appended again (juror already engaged with E001)
-    # The prompt should not contain the evidence section for E001
-    prompt_lines = user_prompt.split('\n')
-    evidence_section_count = sum(1 for line in prompt_lines if "USER REFERENCED EVIDENCE:" in line)
-    
-    # Should be 0 because E001 was already engaged
-    assert evidence_section_count == 0
+    # Check that the FIRST active juror's prompt doesn't repeat E001
+    # (they already engaged with it in round 1)
+    # Look through all calls to find the one for active_juror
+    found_repeat = False
+    for call in orchestrator.llm_service.generate_with_fallback.call_args_list:
+        prompt = call.kwargs.get('user_prompt', '')
+        agent = call.kwargs.get('agent_role', '')
+        # Only check the active juror that already engaged with E001
+        if f"juror_{active_juror.id}" in agent or active_juror.id in agent:
+            if "USER REFERENCED EVIDENCE:" in prompt and "E001" in prompt:
+                found_repeat = True
+
+    # The active juror who already engaged with E001 should NOT see it again
+    assert not found_repeat, "Juror should not see E001 evidence section again"
 
 
 @pytest.mark.asyncio

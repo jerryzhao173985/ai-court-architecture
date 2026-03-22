@@ -57,7 +57,8 @@ class TestComponentInitialization:
         orchestrator = TrialOrchestrator()
         orchestrator.initialize_agents(case_content)
         
-        assert len(orchestrator.agents) == 5
+        # 5 trial agents + up to 2 witnesses + 1 defendant
+        assert len(orchestrator.agents) >= 5
         assert "clerk" in orchestrator.agents
         assert "prosecution" in orchestrator.agents
         assert "defence" in orchestrator.agents

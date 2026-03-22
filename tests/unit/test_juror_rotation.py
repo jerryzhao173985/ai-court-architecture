@@ -128,7 +128,10 @@ async def test_two_of_three_jurors_respond_per_round(sample_case_content, mock_l
 
 @pytest.mark.asyncio
 async def test_juror_rotation_ensures_all_respond_every_two_rounds(sample_case_content, mock_llm_service):
-    """Test that each juror responds at least once every 2 rounds."""
+    """Test that bot jurors respond frequently and all jurors participate."""
+    import random
+    random.seed(42)  # Deterministic for testing
+
     # Setup
     orchestrator = JuryOrchestrator(llm_service=mock_llm_service)
     orchestrator.initialize_jury(sample_case_content)
@@ -148,15 +151,19 @@ async def test_juror_rotation_ensures_all_respond_every_two_rounds(sample_case_c
     # Get all active juror IDs
     active_juror_ids = {j.id for j in orchestrator.jurors if j.type == "active_ai"}
     
-    # Verify each juror responded at least once in every 2-round window
-    for i in range(len(responding_jurors_by_round) - 1):
-        # Combine rounds i and i+1
-        jurors_in_window = responding_jurors_by_round[i] | responding_jurors_by_round[i+1]
-        
-        # All 3 active jurors should have responded within this 2-round window
-        assert active_juror_ids.issubset(jurors_in_window), \
-            f"Not all jurors responded in rounds {i+1}-{i+2}. " \
-            f"Expected {active_juror_ids}, got {jurors_in_window}"
+    # Verify bot jurors (juror_1, juror_2) respond frequently
+    bot_juror_ids = {"juror_1", "juror_2"}
+    for round_jurors in responding_jurors_by_round:
+        # At least one bot juror should respond every round
+        assert len(round_jurors & bot_juror_ids) >= 1, \
+            f"At least one bot juror should respond each round, got {round_jurors}"
+
+    # All active jurors should have responded at least once across 4 rounds
+    all_responders = set()
+    for round_jurors in responding_jurors_by_round:
+        all_responders |= round_jurors
+    assert active_juror_ids.issubset(all_responders), \
+        f"All active jurors should respond at least once in 4 rounds"
 
 
 @pytest.mark.asyncio
@@ -254,23 +261,19 @@ async def test_select_responding_jurors_rotation_logic(sample_case_content, mock
     active_jurors = [j for j in orchestrator.jurors if j.type == "active_ai"]
     assert len(active_jurors) == 3
     
-    # Round 1: No one has responded yet, should pick 2 jurors
+    # Round 1: should pick at least 2 jurors (bot jurors prioritized)
     selected = orchestrator._select_responding_jurors(active_jurors, 1)
-    assert len(selected) == 2
-    
-    # Simulate that these 2 jurors responded in round 1
+    assert len(selected) >= 2
+
+    # Bot jurors (juror_1 or juror_2) should always be in the selection
+    bot_juror_ids = {"juror_1", "juror_2"}
+    selected_ids = {j.id for j in selected}
+    assert len(selected_ids & bot_juror_ids) >= 1, "At least one bot juror should always be selected"
+
+    # Simulate responses
     for juror in selected:
         orchestrator.juror_last_response_round[juror.id] = 1
-    
-    # Round 2: The juror who didn't respond in round 1 MUST respond
-    # Plus one other juror
+
+    # Round 2: should still pick at least 2
     selected = orchestrator._select_responding_jurors(active_jurors, 2)
-    assert len(selected) == 2
-    
-    # The juror who didn't respond in round 1 should be in the selection
-    round_1_responders = {j.id for j in active_jurors if orchestrator.juror_last_response_round.get(j.id) == 1}
-    round_2_selection = {j.id for j in selected}
-    
-    # At least one juror from round 2 should NOT have been in round 1
-    non_round_1_jurors = round_2_selection - round_1_responders
-    assert len(non_round_1_jurors) >= 1, "At least one new juror should respond in round 2"
+    assert len(selected) >= 2

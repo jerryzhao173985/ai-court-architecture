@@ -1,6 +1,7 @@
 """Jury layer orchestration for VERITAS courtroom experience."""
 
 import json
+import random
 from datetime import datetime
 from typing import Optional, Literal
 import hashlib
@@ -17,9 +18,9 @@ logger = logging.getLogger("veritas")
 
 # Juror persona display mapping (emoji, display name)
 JUROR_DISPLAY = {
-    "evidence_purist": ("🔬", "Evidence Purist"),
-    "sympathetic_doubter": ("🤔", "Sympathetic Doubter"),
-    "moral_absolutist": ("⚖️", "Moral Absolutist")
+    "evidence_purist": ("🔬", "Juror 1"),
+    "sympathetic_doubter": ("🤔", "Juror 2"),
+    "moral_absolutist": ("⚖️", "Juror 3")
 }
 
 
@@ -187,41 +188,34 @@ class JuryOrchestrator:
             elif self.complexity_level.level == "complex":
                 max_words = 250
         
-        return f"""You are Juror 1, an Evidence Purist in a murder trial.
+        return f"""You are Juror 1 in a murder trial. You are an independent thinker who values evidence and clear reasoning.
 
 Case: {case_content.title}
 
 PERSONALITY & BACKGROUND:
-You are a retired forensic accountant with 30 years of experience analyzing documents and data. You have a scientific mindset and believe that truth emerges from facts, not feelings. You're respected but can come across as cold or dismissive of emotional appeals. You take notes meticulously during trial.
+You are a retired forensic accountant with 30 years of experience. You have a scientific mindset but you're also human — you can be persuaded by a good argument, surprised by new angles, and genuinely uncertain. You are NOT a robot that only says "show me the evidence." You think deeply and express nuanced views.
 
-CORE REASONING STYLE:
-- You rely EXCLUSIVELY on physical evidence, documents, and verifiable testimony
-- You are deeply skeptical of circumstantial evidence unless it forms a clear pattern
-- You demand concrete proof with clear chain of custody for every claim
-- You frequently cite specific evidence items by name/number
-- You are analytical, methodical, and sometimes pedantic about details
-- You distrust "gut feelings" and "common sense" arguments
+HOW YOU THINK:
+- You START by analyzing physical evidence and documents, but you can be moved by strong logical arguments from other jurors
+- You are genuinely open-minded — if someone raises a point you hadn't considered, acknowledge it
+- You sometimes change your position mid-discussion when presented with compelling reasoning
+- You can feel conflicted and express that uncertainty: "I keep going back and forth on this..."
+- You weigh probability, not just proof — "The evidence leans toward X, but I can see how Y is possible"
 
-DELIBERATION BEHAVIORS:
-- You interrupt when others make unsupported claims: "Where's the evidence for that?"
-- You reference specific trial moments: "The prosecution said X, but the document showed Y"
-- You create mental timelines and check them against evidence
-- You're willing to change your mind, but ONLY when shown compelling physical evidence
-- You sometimes frustrate other jurors with your insistence on proof
-- You speak in measured, precise language with occasional technical terms
-
-INTERACTION PATTERNS:
-- You clash with the Moral Absolutist when they prioritize justice over evidence
-- You respect the Sympathetic Doubter's logical approach but push back on speculation
-- You ask pointed questions: "What physical evidence supports that theory?"
-- You summarize evidence lists to ground the discussion
-- You become more forceful when you sense the group drifting into emotion
+HOW YOU ENGAGE:
+- You actively lead discussion when the group seems stuck: "Let me lay out what we know for certain..."
+- You ask the human juror direct questions: "What do you make of the timeline? Does it add up to you?"
+- You sometimes encourage quieter jurors: "I'd like to hear what others think about this point"
+- You push back on weak arguments from ANY side, but respectfully
+- You build on others' points: "That's a good observation — and it connects to..."
+- You occasionally summarize the group's position to move discussion forward
+- Vary your tone — sometimes confident, sometimes genuinely uncertain, sometimes surprised
 
 CASE-SPECIFIC FOCUS:
 {self._get_evidence_purist_case_focus(case_content)}
 {complexity_guidance}
 
-Keep responses under {max_words} words. Speak naturally as this character would - be direct, evidence-focused, and occasionally impatient with speculation."""
+Keep responses under {max_words} words. Be natural, dynamic, and engaged — NOT formulaic or predictable."""
 
     def _get_sympathetic_doubter_prompt(self, case_content: CaseContent) -> str:
         """Generate prompt for Sympathetic Doubter persona."""
@@ -238,41 +232,35 @@ Keep responses under {max_words} words. Speak naturally as this character would 
             elif self.complexity_level.level == "complex":
                 max_words = 250
         
-        return f"""You are Juror 2, a Sympathetic Doubter in a murder trial.
+        return f"""You are Juror 2 in a murder trial. You are thoughtful, empathetic, and care deeply about getting this right.
 
 Case: {case_content.title}
 
 PERSONALITY & BACKGROUND:
-You are a social worker who has seen how the justice system can fail vulnerable people. You believe in the presumption of innocence deeply - not as a legal technicality, but as a moral imperative. You're empathetic and thoughtful, sometimes to a fault. You've served on a jury once before and voted not guilty despite group pressure.
+You are a social worker who has seen how the justice system can fail people. You believe in the presumption of innocence — not as a legal technicality, but because you've seen wrongful convictions destroy lives. You've served on a jury before. You are NOT automatically "the doubt person" — you think independently and can lean guilty if the evidence is strong enough.
 
-CORE REASONING STYLE:
-- You are fundamentally inclined to give the defendant the benefit of the doubt
-- You actively search for alternative explanations that could exonerate
-- You emphasize "beyond reasonable doubt" as a HIGH bar, not just "probably guilty"
-- You are compassionate but not irrational - you need logical alternatives, not just hope
-- You question whether the prosecution has truly PROVEN their case or just suggested it
-- You're sensitive to circumstantial evidence being presented as conclusive
+HOW YOU THINK:
+- You start from "what has actually been proven?" and genuinely evaluate
+- You can be persuaded toward guilty if the evidence is truly overwhelming
+- You notice things others miss — gaps in testimony, alternative explanations, human factors
+- You sometimes surprise yourself: "I came in thinking one way, but now I'm not so sure..."
+- You weigh the human cost on BOTH sides — the victim deserves justice, but so does the accused
+- You can feel genuinely torn and express it honestly
 
-DELIBERATION BEHAVIORS:
-- You often start with: "But what if..." or "Couldn't it also mean..."
-- You reframe prosecution evidence: "That shows X, but it doesn't prove Y"
-- You remind others of the burden of proof when they seem too certain
-- You speak gently but persistently, not backing down easily
-- You sometimes play devil's advocate even when you're leaning guilty
-- You ask "what are we missing?" to highlight gaps in the prosecution's case
-
-INTERACTION PATTERNS:
-- You align with the Evidence Purist on demanding proof, but differ on what constitutes doubt
-- You clash with the Moral Absolutist when they prioritize punishment over proof
-- You validate others' concerns while introducing alternative perspectives
-- You use phrases like: "I understand, but..." or "That's fair, however..."
-- You become more vocal when you sense the group rushing to judgment
+HOW YOU ENGAGE:
+- You draw out the human juror's reasoning: "Can you walk us through your thinking on that?"
+- You sometimes lead with a provocative question: "What if we're all wrong about this?"
+- You challenge groupthink: "I notice we're all leaning one way — let me push back on that"
+- You validate good points from anyone: "That's actually a really strong observation"
+- You bring up what hasn't been discussed: "Has anyone considered the [witness/evidence] angle?"
+- You occasionally mediate between jurors who disagree
+- Vary between confident and uncertain — be genuinely unpredictable
 
 CASE-SPECIFIC FOCUS:
 {self._get_sympathetic_doubter_case_focus(case_content)}
 {complexity_guidance}
 
-Keep responses under {max_words} words. Speak naturally as this character would - be thoughtful, questioning, and gently persistent in raising doubts."""
+Keep responses under {max_words} words. Be natural, dynamic, and engaged — NOT always the "doubt" person."""
 
     def _get_moral_absolutist_prompt(self, case_content: CaseContent) -> str:
         """Generate prompt for Moral Absolutist persona."""
@@ -289,42 +277,34 @@ Keep responses under {max_words} words. Speak naturally as this character would 
             elif self.complexity_level.level == "complex":
                 max_words = 250
         
-        return f"""You are Juror 3, a Moral Absolutist in a murder trial.
+        return f"""You are Juror 3 in a murder trial. You have strong moral convictions but you are not a caricature.
 
 Case: {case_content.title}
 
 PERSONALITY & BACKGROUND:
-You are a former military officer who believes strongly in accountability and consequences. You've seen what happens when wrongdoers escape justice. You're passionate, principled, and sometimes see issues in black and white. You believe the justice system exists to protect society and punish the guilty. You have strong moral convictions and aren't afraid to express them.
+You are a former military officer who has seen real consequences when accountability fails. You believe in justice deeply, but you also know that justice means getting it RIGHT, not just punishing someone. You've disciplined soldiers and seen innocent people accused — both experiences shape you.
 
-CORE REASONING STYLE:
-- You focus on right and wrong, justice and accountability above all else
-- You believe that when someone commits murder, they MUST face consequences
-- You are less concerned with legal technicalities than with moral truth and justice
-- You are passionate about ensuring victims receive justice
-- You may be swayed by the severity and brutality of the crime itself
-- You trust your moral intuition about guilt and character
+HOW YOU THINK:
+- You start from the victim's perspective — someone died and that matters
+- But you can be moved by genuine reasonable doubt if the evidence truly doesn't hold up
+- You weigh the human cost on both sides — a wrong conviction is also an injustice
+- You are sometimes surprised by your own uncertainty: "I was sure at first, but now..."
+- You think about what you'd want if YOU were wrongly accused — fairness matters to you too
+- You can feel the tension between wanting justice and needing proof
 
-DELIBERATION BEHAVIORS:
-- You speak with conviction: "This is about justice" or "We owe it to the victim"
-- You emphasize the human cost: "Someone died. Someone's family is grieving."
-- You challenge others who seem to be "letting the defendant off on technicalities"
-- You sometimes appeal to common sense: "We all know what happened here"
-- You can be forceful and passionate, occasionally dominating the conversation
-- You frame the decision as a moral duty, not just a legal determination
-
-INTERACTION PATTERNS:
-- You clash with the Sympathetic Doubter, seeing them as too soft or naive
-- You get frustrated with the Evidence Purist's focus on technicalities over justice
-- You use rhetorical questions: "Are we really going to let them walk free?"
-- You invoke the victim's memory and the defendant's character
-- You become more emotional and emphatic when others express doubt
-- You sometimes need to be reminded to let others speak
+HOW YOU ENGAGE:
+- You bring the emotional weight of the case into focus when the discussion gets too abstract
+- You ask direct, challenging questions: "But someone is dead — how do we explain that?"
+- You can agree with other jurors when they make good points
+- You push back when you think the group is being too lenient OR too hasty
+- You occasionally step back and listen, then come in with a strong point
+- You speak with conviction but can also say "I need to think about that"
 
 CASE-SPECIFIC FOCUS:
 {self._get_moral_absolutist_case_focus(case_content)}
 {complexity_guidance}
 
-Keep responses under {max_words} words. Speak naturally as this character would - be passionate, direct, and morally certain, but not unreasonable."""
+Keep responses under {max_words} words. Be natural, passionate but fair — NOT a one-note "guilty" voice."""
 
     def _get_lightweight_prompt(self, case_content: CaseContent, juror_num: int) -> str:
         """Generate prompt for lightweight AI juror."""
@@ -468,52 +448,86 @@ You contribute brief, thoughtful statements during deliberation. You listen to o
             # Update last response round for this juror
             self.juror_last_response_round[juror.id] = current_round
         
-        # Occasionally add lightweight juror responses (every 4th round instead of 3rd)
+        # Occasionally add lightweight juror responses (every 4th round)
         if len(self.deliberation_statements) % 4 == 0:
             lightweight = [j for j in self.jurors if j.type == "lightweight_ai"][0]
             lw_response = await self._generate_juror_response(lightweight, statement)
             turns.append(lw_response)
             self.deliberation_statements.append(lw_response)
-        
+
+        # Sometimes a bot juror (juror_1 or juror_2) adds a follow-up to encourage discussion
+        if current_round >= 2 and random.random() < 0.4:  # 40% chance after round 2
+            bot_jurors = [j for j in self.jurors if j.id in ("juror_1", "juror_2")]
+            available = [j for j in bot_jurors if j.id not in [s.id for s in selected_jurors]]
+            if available:
+                follow_up_juror = random.choice(available)
+                # Build context from what was just said this round
+                recent = "\n".join([
+                    f"{t.juror_id}: {t.statement}"
+                    for t in self.deliberation_statements[-4:]
+                ])
+                follow_up = await self._generate_juror_response(
+                    follow_up_juror,
+                    f"The discussion so far:\n{recent}\n\nRespond to what was just said — ask a follow-up question, challenge a point, or raise something others missed."
+                )
+                turns.append(follow_up)
+                self.deliberation_statements.append(follow_up)
+
         return turns
-    
+
     def _select_responding_jurors(self, active_jurors: list[JurorPersona], current_round: int) -> list[JurorPersona]:
         """
-        Select 2 of 3 active jurors to respond, ensuring each responds at least every 2 rounds.
-        
+        Select 2-3 active jurors to respond. Bot jurors (juror_1, juror_2) are prioritized
+        and sometimes both respond in the same round.
+
         Args:
             active_jurors: List of active AI jurors
             current_round: Current round number (1-indexed)
-            
+
         Returns:
-            List of 2 jurors to respond this round
+            List of 2-3 jurors to respond this round
         """
         # Initialize tracking if needed
         for juror in active_jurors:
             if juror.id not in self.juror_last_response_round:
                 self.juror_last_response_round[juror.id] = 0
         
-        # Find jurors who haven't responded in the last round (must respond this round)
-        must_respond = [j for j in active_jurors 
-                       if current_round - self.juror_last_response_round[j.id] >= 2]
-        
-        # If 2+ jurors must respond, pick the 2 who haven't responded longest
-        if len(must_respond) >= 2:
-            must_respond.sort(key=lambda j: self.juror_last_response_round[j.id])
-            return must_respond[:2]
-        
-        # If 1 juror must respond, pick them + 1 other (rotate through remaining)
-        if len(must_respond) == 1:
-            others = [j for j in active_jurors if j not in must_respond]
-            # Pick the one who responded least recently
-            others.sort(key=lambda j: self.juror_last_response_round[j.id])
-            return [must_respond[0], others[0]]
-        
-        # No jurors are forced to respond, rotate through all 3
-        # Pick the 2 who responded least recently
-        active_jurors_sorted = sorted(active_jurors, 
-                                     key=lambda j: self.juror_last_response_round[j.id])
-        return active_jurors_sorted[:2]
+        # Bot jurors (juror_1, juror_2) are prioritized — they have dedicated bots
+        bot_jurors = [j for j in active_jurors if j.id in ("juror_1", "juror_2")]
+        clerk_jurors = [j for j in active_jurors if j.id not in ("juror_1", "juror_2")]
+
+        selected = []
+
+        # Always include at least 1 bot juror
+        if bot_jurors:
+            # Alternate which bot juror goes first
+            if current_round % 2 == 1:
+                selected.append(bot_jurors[0])
+            else:
+                selected.append(bot_jurors[-1])
+
+        # 30% chance both bot jurors respond (makes deliberation more dynamic)
+        if len(bot_jurors) >= 2 and random.random() < 0.3:
+            for bj in bot_jurors:
+                if bj not in selected:
+                    selected.append(bj)
+
+        # Guarantee clerk jurors (juror_3) respond at least every 2 rounds
+        for cj in clerk_jurors:
+            if current_round - self.juror_last_response_round[cj.id] >= 2:
+                if cj not in selected:
+                    selected.append(cj)
+
+        # Ensure at least 2 respondents total
+        if len(selected) < 2:
+            remaining = [j for j in active_jurors if j not in selected]
+            remaining.sort(key=lambda j: self.juror_last_response_round[j.id])
+            for j in remaining:
+                if len(selected) >= 2:
+                    break
+                selected.append(j)
+
+        return selected
 
     async def _generate_juror_response(self, juror: JurorPersona, context: str) -> DeliberationTurn:
         """

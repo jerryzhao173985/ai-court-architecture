@@ -56,6 +56,13 @@ class LuffaConfig(BaseModel):
     fact_checker_bot: Optional[LuffaBotConfig] = Field(default=None, alias="factCheckerBot")
     judge_bot: Optional[LuffaBotConfig] = Field(default=None, alias="judgeBot")
     
+    # Witness bots (map first 2 case witnesses to dedicated bots)
+    witness_1_bot: Optional[LuffaBotConfig] = Field(default=None, alias="witness1Bot")
+    witness_2_bot: Optional[LuffaBotConfig] = Field(default=None, alias="witness2Bot")
+
+    # Defendant bot
+    defendant_bot: Optional[LuffaBotConfig] = Field(default=None, alias="defendantBot")
+
     # Optional: Additional bots for AI jurors
     juror_bots: dict[str, LuffaBotConfig] = Field(default_factory=dict, alias="jurorBots")
     
@@ -170,6 +177,32 @@ def load_config() -> AppConfig:
             enabled=os.getenv("LUFFA_BOT_JUDGE_ENABLED", "true").lower() == "true"
         )
     
+    # Load witness bots
+    witness_1_bot = None
+    if os.getenv("LUFFA_BOT_WITNESS_1_UID") and os.getenv("LUFFA_BOT_WITNESS_1_SECRET"):
+        witness_1_bot = LuffaBotConfig(
+            uid=os.getenv("LUFFA_BOT_WITNESS_1_UID"),
+            secret=os.getenv("LUFFA_BOT_WITNESS_1_SECRET"),
+            enabled=os.getenv("LUFFA_BOT_WITNESS_1_ENABLED", "true").lower() == "true"
+        )
+
+    witness_2_bot = None
+    if os.getenv("LUFFA_BOT_WITNESS_2_UID") and os.getenv("LUFFA_BOT_WITNESS_2_SECRET"):
+        witness_2_bot = LuffaBotConfig(
+            uid=os.getenv("LUFFA_BOT_WITNESS_2_UID"),
+            secret=os.getenv("LUFFA_BOT_WITNESS_2_SECRET"),
+            enabled=os.getenv("LUFFA_BOT_WITNESS_2_ENABLED", "true").lower() == "true"
+        )
+
+    # Load defendant bot
+    defendant_bot = None
+    if os.getenv("LUFFA_BOT_DEFENDANT_UID") and os.getenv("LUFFA_BOT_DEFENDANT_SECRET"):
+        defendant_bot = LuffaBotConfig(
+            uid=os.getenv("LUFFA_BOT_DEFENDANT_UID"),
+            secret=os.getenv("LUFFA_BOT_DEFENDANT_SECRET"),
+            enabled=os.getenv("LUFFA_BOT_DEFENDANT_ENABLED", "true").lower() == "true"
+        )
+
     # Load optional juror bots
     juror_bots = {}
     for i in range(1, 8):  # Support up to 7 AI juror bots
@@ -212,6 +245,9 @@ def load_config() -> AppConfig:
             defenceBot=defence_bot,
             factCheckerBot=fact_checker_bot,
             judgeBot=judge_bot,
+            witness1Bot=witness_1_bot,
+            witness2Bot=witness_2_bot,
+            defendantBot=defendant_bot,
             jurorBots=juror_bots,
             apiKey=legacy_bot_secret,
             botEnabled=os.getenv("LUFFA_BOT_ENABLED", "false").lower() == "true",

@@ -66,6 +66,9 @@ class MultiBotSDKClient:
             "defence": self.config.defence_bot,
             "fact_checker": self.config.fact_checker_bot,
             "judge": self.config.judge_bot,
+            "witness_1": self.config.witness_1_bot,
+            "witness_2": self.config.witness_2_bot,
+            "defendant": self.config.defendant_bot,
         }
         for role, bot in bot_map.items():
             if bot and bot.enabled:

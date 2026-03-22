@@ -402,23 +402,46 @@ class MultiBotService:
             "prosecution": "prosecution",
             "defence": "defence",
             "fact_checker": "fact_checker",
-            "judge": "judge"
+            "judge": "judge",
+            "witness_1": "witness_1",
+            "witness_2": "witness_2",
+            "defendant": "defendant",
         }
-        
+
         bot_role = role_mapping.get(agent_role, "clerk")
-        
+
+        # Fallback: if bot not configured for this role, use clerk with role prefix
+        if not self.multi_bot.has_bot_for_role(bot_role):
+            bot_role = "clerk"
+
         # Add role emoji
         role_emoji = {
             "clerk": "📋",
             "prosecution": "👔",
             "defence": "🛡️",
             "fact_checker": "🔍",
-            "judge": "⚖️"
+            "judge": "⚖️",
+            "witness_1": "🗣️",
+            "witness_2": "🗣️",
+            "defendant": "👤",
         }
-        
+
         emoji = role_emoji.get(agent_role, "🎭")
-        formatted_message = f"{emoji} **{agent_role.upper()}**\n\n{content}"
-        
+
+        # Use character name for witnesses/defendant if available
+        display_name = agent_role.replace("_", " ").upper()
+        if agent_role.startswith("witness_") or agent_role == "defendant":
+            orchestrator = self._get_user_orchestrator_by_group(group_id)
+            if orchestrator and orchestrator.case_content:
+                if agent_role == "defendant":
+                    display_name = orchestrator.case_content.narrative.defendant_profile.name.upper()
+                elif agent_role == "witness_1" and len(orchestrator.case_content.narrative.witness_profiles) >= 1:
+                    display_name = orchestrator.case_content.narrative.witness_profiles[0].name.upper()
+                elif agent_role == "witness_2" and len(orchestrator.case_content.narrative.witness_profiles) >= 2:
+                    display_name = orchestrator.case_content.narrative.witness_profiles[1].name.upper()
+
+        formatted_message = f"{emoji} **{display_name}**\n\n{content}"
+
         # Send from appropriate bot
         success = await self.multi_bot.send_as_agent(bot_role, group_id, formatted_message)
         
@@ -439,24 +462,21 @@ class MultiBotService:
         result = await orchestrator.submit_deliberation_statement(statement)
         
         if result["success"]:
-            # Send AI juror responses with persona identity
-            # Note: If juror bots configured, could send from those bots
-            # For now, send from clerk bot
+            # Send AI juror responses — route through juror bot if configured, else clerk
             for turn in result["turns"][1:]:  # Skip user's own turn
                 juror_id = turn["jurorId"]
                 juror_statement = turn["statement"]
-                
+
                 # Get juror display info (emoji and name)
                 emoji, name = orchestrator.jury_orchestrator.get_juror_display_info(juror_id)
-                
-                # Extract juror number from juror_id (e.g., "juror_1" -> "1")
                 juror_num = juror_id.replace("juror_", "")
-                
-                # Format: "{emoji} {name} (Juror {n}): {statement}"
                 formatted_message = f"{emoji} {name} (Juror {juror_num}): {juror_statement}"
-                
+
+                # Use dedicated juror bot if configured, else clerk
+                bot_role = juror_id if self.multi_bot.has_bot_for_role(juror_id) else "clerk"
+
                 await self.multi_bot.send_as_agent(
-                    "clerk",
+                    bot_role,
                     group_id,
                     formatted_message
                 )
@@ -898,6 +918,13 @@ Each agent is a separate bot for a realistic courtroom experience!"""
         session_id = self.uid_to_session.get(uid)
         if session_id:
             return self.active_sessions.get(session_id)
+        return None
+
+    def _get_user_orchestrator_by_group(self, group_id: str) -> Optional[ExperienceOrchestrator]:
+        """Get first active orchestrator for a group (for display name lookups)."""
+        for session_id, orchestrator in self.active_sessions.items():
+            if f"_{group_id}_" in session_id:
+                return orchestrator
         return None
 
     async def _cleanup_user_session(self, uid: str, group_id: str):

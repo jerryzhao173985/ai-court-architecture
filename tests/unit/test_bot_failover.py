@@ -38,6 +38,9 @@ def mock_config():
         enabled=True
     )
     config.fact_checker_bot = None
+    config.witness_1_bot = None
+    config.witness_2_bot = None
+    config.defendant_bot = None
     config.juror_bots = {}
     
     return config

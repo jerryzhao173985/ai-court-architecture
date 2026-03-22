@@ -97,9 +97,9 @@ def test_juror_display_constant_exists():
     assert "moral_absolutist" in JUROR_DISPLAY
     
     # Check structure: (emoji, display_name)
-    assert JUROR_DISPLAY["evidence_purist"] == ("🔬", "Evidence Purist")
-    assert JUROR_DISPLAY["sympathetic_doubter"] == ("🤔", "Sympathetic Doubter")
-    assert JUROR_DISPLAY["moral_absolutist"] == ("⚖️", "Moral Absolutist")
+    assert JUROR_DISPLAY["evidence_purist"] == ("🔬", "Juror 1")
+    assert JUROR_DISPLAY["sympathetic_doubter"] == ("🤔", "Juror 2")
+    assert JUROR_DISPLAY["moral_absolutist"] == ("⚖️", "Juror 3")
 
 
 def test_get_juror_display_info_for_active_ai_jurors(sample_case):
@@ -110,17 +110,17 @@ def test_get_juror_display_info_for_active_ai_jurors(sample_case):
     # Test evidence purist (juror_1)
     emoji, name = orchestrator.get_juror_display_info("juror_1")
     assert emoji == "🔬"
-    assert name == "Evidence Purist"
+    assert name == "Juror 1"
     
     # Test sympathetic doubter (juror_2)
     emoji, name = orchestrator.get_juror_display_info("juror_2")
     assert emoji == "🤔"
-    assert name == "Sympathetic Doubter"
+    assert name == "Juror 2"
     
     # Test moral absolutist (juror_3)
     emoji, name = orchestrator.get_juror_display_info("juror_3")
     assert emoji == "⚖️"
-    assert name == "Moral Absolutist"
+    assert name == "Juror 3"
 
 
 def test_get_juror_display_info_for_lightweight_jurors(sample_case):
@@ -177,7 +177,7 @@ async def test_deliberation_message_format_in_orchestrator(sample_case):
         
         # Verify we got valid display info
         assert emoji in ["🔬", "🤔", "⚖️", "👤"]
-        assert name in ["Evidence Purist", "Sympathetic Doubter", "Moral Absolutist"] or name.startswith("Juror ")
+        assert name in ["Juror 1", "Juror 2", "Juror 3"] or name.startswith("Juror ")
         
         # Verify we can format the message
         juror_num = juror_id.replace("juror_", "")
@@ -201,4 +201,4 @@ def test_juror_display_info_consistency_across_calls(sample_case):
         emoji2, name2 = orchestrator.get_juror_display_info("juror_1")
         
         assert emoji1 == emoji2 == "🔬"
-        assert name1 == name2 == "Evidence Purist"
+        assert name1 == name2 == "Juror 1"

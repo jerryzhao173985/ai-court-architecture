@@ -1,6 +1,7 @@
 """Trial layer agent orchestration for VERITAS courtroom experience."""
 
 import asyncio
+import random
 from datetime import datetime
 from typing import Optional, Literal
 import logging
@@ -19,7 +20,8 @@ class TrialAgent(BaseModel):
     """Configuration for a trial layer AI agent."""
     model_config = ConfigDict(populate_by_name=True)
     
-    role: Literal["clerk", "prosecution", "defence", "fact_checker", "judge"]
+    role: Literal["clerk", "prosecution", "defence", "fact_checker", "judge",
+                  "witness_1", "witness_2", "defendant"]
     system_prompt: str = Field(alias="systemPrompt")
     character_limit: int = Field(alias="characterLimit")
     response_timeout: int = Field(alias="responseTimeout")  # milliseconds
@@ -65,6 +67,8 @@ class TrialOrchestrator:
         self.llm_service = llm_service
         self.complexity_analyzer = CaseComplexityAnalyzer()
         self.complexity_level: Optional[ComplexityLevel] = None
+        # Store witness/defendant testimony from evidence stage for cross-examination context
+        self.evidence_testimony: dict[str, str] = {}
 
     def initialize_agents(self, case_content: CaseContent) -> None:
         """
@@ -81,7 +85,6 @@ class TrialOrchestrator:
         logger.info(f"Case complexity: {self.complexity_level.level}")
         
         # Select emphasis items for prosecution/defence variation (Task 26.3)
-        import random
         num_emphasis = min(3, len(case_content.evidence))
         self.emphasis_items = random.sample(case_content.evidence, k=num_emphasis)
         logger.info(f"Selected {num_emphasis} emphasis items for trial variation")
@@ -119,6 +122,25 @@ class TrialOrchestrator:
                 responseTimeout=30000
             )
         }
+
+        # Create witness agents from case witness profiles (first 2 get bots)
+        for i, witness_profile in enumerate(case_content.narrative.witness_profiles[:2], start=1):
+            self.agents[f"witness_{i}"] = TrialAgent(
+                role=f"witness_{i}",
+                systemPrompt=self._get_witness_prompt(case_content, witness_profile, i),
+                characterLimit=self._adjust_char_limit(1000),
+                responseTimeout=30000
+            )
+            logger.info(f"Created witness_{i} agent: {witness_profile.name}")
+
+        # Create defendant agent
+        self.agents["defendant"] = TrialAgent(
+            role="defendant",
+            systemPrompt=self._get_defendant_prompt(case_content),
+            characterLimit=self._adjust_char_limit(1000),
+            responseTimeout=30000
+        )
+        logger.info(f"Created defendant agent: {case_content.narrative.defendant_profile.name}")
     
     def _adjust_char_limit(self, base_limit: int) -> int:
         """Adjust character limit based on case complexity."""
@@ -348,6 +370,82 @@ Your role is to:
 Be authoritative, fair, and clear in your instructions.
 {complexity_guidance}"""
 
+    def _get_witness_prompt(self, case_content: CaseContent, witness_profile, witness_num: int) -> str:
+        """Generate system prompt for a witness agent.
+
+        Witnesses are called by the prosecution to give testimony supporting
+        the Crown's case. The defence then cross-examines them.
+        """
+        evidence_summary = "\n".join([f"- {e.title}: {e.description}" for e in case_content.evidence])
+        facts = "\n".join([f"- {f}" for f in witness_profile.relevant_facts])
+
+        return f"""You are {witness_profile.name}, {witness_profile.role}, testifying in a British Crown Court trial.
+
+Case: {case_content.title}
+Defendant: {case_content.narrative.defendant_profile.name}
+Victim: {case_content.narrative.victim_profile.name}
+
+YOUR BACKGROUND:
+{witness_profile.background}
+
+YOUR RELEVANT FACTS (what you know and can testify about):
+{facts}
+
+CASE EVIDENCE (for context):
+{evidence_summary}
+
+YOUR ROLE IN COURT:
+- You have been called as a prosecution witness (Witness {witness_num})
+- During EVIDENCE PRESENTATION: The prosecution barrister examines you. Present your testimony clearly — what you saw, found, or analysed. Answer the prosecution's questions to help build their case.
+- During CROSS-EXAMINATION: The defence barrister will challenge your testimony. Answer honestly but defend your observations. The defence will try to create doubt about your findings — respond factually and acknowledge genuine limitations.
+- Stay in character as {witness_profile.name}, {witness_profile.role}
+- Only speak about things you would credibly know given your professional role
+- Be truthful — if you don't know something, say so
+- Do NOT volunteer opinions on guilt or innocence — you are a witness, not a juror
+
+TONE: Professional, authoritative within your expertise, measured. You are under oath.
+
+Keep responses under 400 words."""
+
+    def _get_defendant_prompt(self, case_content: CaseContent) -> str:
+        """Generate system prompt for the defendant agent.
+
+        In UK Crown Court, the defendant is called by the defence barrister
+        to give testimony. The prosecution then cross-examines.
+        """
+        defendant = case_content.narrative.defendant_profile
+        evidence_summary = "\n".join([f"- {e.title}: {e.description}" for e in case_content.evidence])
+        facts = "\n".join([f"- {f}" for f in defendant.relevant_facts])
+
+        return f"""You are {defendant.name}, the accused in a British Crown Court trial. You are in the witness box.
+
+Case: {case_content.title}
+Charge: {case_content.narrative.charge_text}
+Victim: {case_content.narrative.victim_profile.name}
+
+YOUR BACKGROUND:
+{defendant.background}
+
+YOUR RELEVANT FACTS:
+{facts}
+
+EVIDENCE AGAINST YOU:
+{evidence_summary}
+
+YOUR ROLE IN COURT:
+- You have pleaded NOT GUILTY
+- During EVIDENCE PRESENTATION: Your defence barrister examines you. Tell your side of the story — explain your actions, your relationship with the victim, and your account of events. Be specific about times, locations, and what you did.
+- During CROSS-EXAMINATION: The prosecution barrister will challenge your account aggressively. They will try to catch you in contradictions. Stay composed, answer directly, and maintain your innocence. If pressed on the evidence against you, provide explanations.
+- You are nervous but trying to appear composed — this is the fight of your life
+- You know your own truth but the evidence looks bad
+- Address specific evidence items when asked — don't dodge questions
+- Show genuine emotion at appropriate moments (fear, frustration, sadness about the victim)
+- Respectful to the court at all times — "Yes, My Lord", "No, My Lord" to the judge
+
+TONE: Earnest, human, slightly nervous. You are not a perfect speaker — you sometimes stumble, correct yourself, show emotion. This makes you believable.
+
+Keep responses under 400 words."""
+
     async def execute_stage(self, stage: ExperienceState) -> list[AgentResponse]:
         """
         Execute agents for the current trial stage.
@@ -371,60 +469,128 @@ Be authoritative, fair, and clear in your instructions.
             responses.append(await self._generate_agent_response("defence", stage))
         
         elif stage == ExperienceState.EVIDENCE_PRESENTATION:
-            # Both sides present evidence
+            # UK Crown Court order:
+            # 1. Prosecution presents its case and calls prosecution witnesses
+            # 2. Defence presents its case, calls defendant to testify
+
+            # --- PROSECUTION'S CASE ---
             prosecution_response = await self._generate_agent_response("prosecution", stage)
             responses.append(prosecution_response)
-            
-            # Check prosecution statement for contradictions
+
+            # Fact-check prosecution
             fact_check = await self.check_fact_accuracy(
                 statement=prosecution_response.content,
                 speaker="prosecution",
                 stage=stage
             )
             if fact_check and fact_check.is_contradiction:
-                intervention = self.trigger_fact_check_intervention(fact_check)
-                responses.append(intervention)
-            
+                responses.append(self.trigger_fact_check_intervention(fact_check))
+
+            # Prosecution calls witnesses — Clerk announces each one
+            for i, witness_key in enumerate(["witness_1", "witness_2"]):
+                if witness_key in self.agents and self.case_content:
+                    profiles = self.case_content.narrative.witness_profiles
+                    if i < len(profiles):
+                        # Clerk calls the witness
+                        responses.append(AgentResponse(
+                            agent_role="clerk",
+                            content=f"Call {profiles[i].name}.",
+                            timestamp=datetime.now(),
+                            metadata={"stage": stage.value, "witness_call": True}
+                        ))
+                    witness_response = await self._generate_agent_response(witness_key, stage, prosecution_response.content)
+                    responses.append(witness_response)
+                    self.evidence_testimony[witness_key] = witness_response.content  # Store for cross-exam
+
+            # Judge may briefly intervene after witness testimony
+            judge_comment = await self._maybe_judge_intervention(responses, stage)
+            if judge_comment:
+                responses.append(judge_comment)
+
+            # --- DEFENCE'S CASE ---
             defence_response = await self._generate_agent_response("defence", stage)
             responses.append(defence_response)
-            
-            # Check defence statement for contradictions
+
+            # Fact-check defence
             fact_check = await self.check_fact_accuracy(
                 statement=defence_response.content,
                 speaker="defence",
                 stage=stage
             )
             if fact_check and fact_check.is_contradiction:
-                intervention = self.trigger_fact_check_intervention(fact_check)
-                responses.append(intervention)
-        
+                responses.append(self.trigger_fact_check_intervention(fact_check))
+
+            # Defence calls defendant to testify — Clerk announces
+            if "defendant" in self.agents and self.case_content:
+                defendant_name = self.case_content.narrative.defendant_profile.name
+                responses.append(AgentResponse(
+                    agent_role="clerk",
+                    content=f"Call {defendant_name}.",
+                    timestamp=datetime.now(),
+                    metadata={"stage": stage.value, "defendant_call": True}
+                ))
+                defendant_response = await self._generate_agent_response("defendant", stage, defence_response.content)
+                responses.append(defendant_response)
+                self.evidence_testimony["defendant"] = defendant_response.content  # Store for cross-exam
+
         elif stage == ExperienceState.CROSS_EXAMINATION:
-            # Both sides cross-examine
-            prosecution_response = await self._generate_agent_response("prosecution", stage)
-            responses.append(prosecution_response)
-            
-            # Check prosecution statement for contradictions
-            fact_check = await self.check_fact_accuracy(
-                statement=prosecution_response.content,
-                speaker="prosecution",
-                stage=stage
+            # UK Crown Court order:
+            # 1. Defence cross-examines prosecution witnesses
+            # 2. Prosecution cross-examines defendant
+
+            # --- DEFENCE CROSS-EXAMINES PROSECUTION WITNESSES ---
+            # Build context from witness testimony during evidence presentation
+            witness_testimony_context = ""
+            for key in ["witness_1", "witness_2"]:
+                if key in self.evidence_testimony:
+                    witness_testimony_context += f"\n{key} testified: \"{self.evidence_testimony[key][:300]}...\"\n"
+
+            defence_response = await self._generate_agent_response(
+                "defence", stage, witness_testimony_context if witness_testimony_context else ""
             )
-            if fact_check and fact_check.is_contradiction:
-                intervention = self.trigger_fact_check_intervention(fact_check)
-                responses.append(intervention)
-            
-            defence_response = await self._generate_agent_response("defence", stage)
             responses.append(defence_response)
-            
-            # Check defence statement for contradictions
+
+            # Prosecution witnesses answer defence's cross-examination questions
+            if "witness_1" in self.agents:
+                responses.append(await self._generate_agent_response("witness_1", stage, defence_response.content))
+            if "witness_2" in self.agents:
+                responses.append(await self._generate_agent_response("witness_2", stage, defence_response.content))
+
+            # Fact-check the exchange
             fact_check = await self.check_fact_accuracy(
                 statement=defence_response.content,
                 speaker="defence",
                 stage=stage
             )
             if fact_check and fact_check.is_contradiction:
-                intervention = self.trigger_fact_check_intervention(fact_check)
-                responses.append(intervention)
+                responses.append(self.trigger_fact_check_intervention(fact_check))
+
+            # Judge may intervene after witness cross-examination
+            judge_comment = await self._maybe_judge_intervention(responses, stage)
+            if judge_comment:
+                responses.append(judge_comment)
+
+            # --- PROSECUTION CROSS-EXAMINES DEFENDANT ---
+            # Pass defendant's own testimony as context so prosecution can reference it
+            defendant_testimony = self.evidence_testimony.get("defendant", "")
+            prosecution_response = await self._generate_agent_response(
+                "prosecution", stage,
+                f"The defendant testified: \"{defendant_testimony[:300]}...\"" if defendant_testimony else ""
+            )
+            responses.append(prosecution_response)
+
+            # Defendant answers prosecution's cross-examination questions
+            if "defendant" in self.agents:
+                responses.append(await self._generate_agent_response("defendant", stage, prosecution_response.content))
+
+            # Fact-check prosecution cross-examination
+            fact_check = await self.check_fact_accuracy(
+                statement=prosecution_response.content,
+                speaker="prosecution",
+                stage=stage
+            )
+            if fact_check and fact_check.is_contradiction:
+                responses.append(self.trigger_fact_check_intervention(fact_check))
         
         elif stage == ExperienceState.PROSECUTION_CLOSING:
             responses.append(await self._generate_agent_response("prosecution", stage))
@@ -437,14 +603,16 @@ Be authoritative, fair, and clear in your instructions.
         
         return responses
 
-    async def _generate_agent_response(self, agent_role: str, stage: ExperienceState) -> AgentResponse:
+    async def _generate_agent_response(self, agent_role: str, stage: ExperienceState,
+                                       preceding_context: str = "") -> AgentResponse:
         """
         Generate response from an agent using LLM.
-        
+
         Args:
             agent_role: The role of the agent
             stage: The current stage
-            
+            preceding_context: Optional context from preceding speaker (e.g., barrister's question)
+
         Returns:
             Agent response
         """
@@ -463,6 +631,9 @@ Be authoritative, fair, and clear in your instructions.
         
         # Generate user prompt based on stage
         user_prompt = self._get_stage_prompt(agent_role, stage)
+        # Add preceding context so witnesses/defendant respond to what was actually said
+        if preceding_context:
+            user_prompt = f"The barrister has just said:\n\"{preceding_context[:500]}\"\n\n{user_prompt}"
         fallback = self._get_fallback_response(agent_role, stage)
         
         # Use LLM service if available, otherwise use fallback
@@ -556,28 +727,80 @@ Be authoritative, fair, and clear in your instructions.
                 "Deliver your opening statement to the jury. Frame this case as built on speculation, not proof. Warn the jury that the prosecution will ask them to fill gaps with assumptions. Preview the weaknesses in their case: timeline inconsistencies, missing physical evidence, alternative explanations. Remind them that the burden of proof rests entirely with the prosecution. Plant the first seeds of reasonable doubt - be confident and clear that the evidence will not meet the standard of proof beyond reasonable doubt.",
             
             ("prosecution", ExperienceState.EVIDENCE_PRESENTATION):
-                "Present the key evidence that supports the prosecution's case. Walk through each piece methodically: the forged will establishing motive, the testimony placing the defendant at the scene, the toxicology showing cause of death, and the defendant's access to the means. Connect the dots for the jury - show how these pieces form a complete picture of guilt.",
-            
+                "Present the key evidence that supports the prosecution's case. Walk through each piece methodically — connect motive, means, and opportunity. Reference the specific evidence items from this case. Connect the dots for the jury — show how these pieces form a complete picture of guilt.",
+
             ("defence", ExperienceState.EVIDENCE_PRESENTATION):
-                "Present evidence and arguments that create reasonable doubt. Highlight what's missing: no fingerprints, no witnesses to the actual act, no direct evidence. Present the security log showing the tight timeline - is it really possible? Emphasize the absence of physical evidence linking your client to the crime. Offer alternative explanations: natural causes initially suspected, others with access to the estate, the victim's age and health. Make the jury see that the prosecution's case requires them to assume, not conclude.",
-            
+                "Present evidence and arguments that create reasonable doubt. Highlight what is missing from the prosecution's case — what evidence do they NOT have? Challenge the strength of their circumstantial evidence. Offer alternative explanations. Make the jury see that the prosecution's case requires them to assume, not conclude.",
+
             ("prosecution", ExperienceState.CROSS_EXAMINATION):
-                "Cross-examine the defence's evidence and witnesses. Challenge the timeline defence - if the security log shows he left at 8:20, how tight is that window really? Question the significance of missing fingerprints - could gloves explain this? Press on the defendant's account - why should we believe someone caught with a forged will? Be incisive but professional.",
-            
+                "You are cross-examining the defendant. Challenge their account aggressively but professionally. Press on contradictions in their testimony, question their timeline, challenge their explanations for the evidence against them. Ask pointed questions: 'Can you explain why...?', 'Isn't it true that...?', 'How do you account for...?'",
+
             ("defence", ExperienceState.CROSS_EXAMINATION):
-                "Cross-examine the prosecution's evidence and witnesses. Attack the timeline precision - can the housekeeper really be certain about exact times? Question the toxicology interpretation - couldn't digoxin levels be consistent with prescribed medication? Challenge the motive assumption - discovering a forgery doesn't automatically lead to murder. Expose the lack of direct evidence - no one saw the act, no fingerprints, no weapon. Ask the questions that create doubt: 'How can you be certain?' 'Isn't it possible that...?' 'Where is the proof?' Be methodical and relentless in exposing gaps.",
-            
+                "You are cross-examining the prosecution's witnesses. Challenge their reliability, precision, and conclusions. Highlight what the witnesses did NOT see or cannot confirm. Ask questions that create doubt: 'Can you be absolutely certain?', 'Isn't it possible that...?', 'Did you actually see...?'",
+
             ("prosecution", ExperienceState.PROSECUTION_CLOSING):
-                "Deliver your closing speech. This is your final opportunity to convince the jury. Summarize the overwhelming evidence: the defendant had motive (£500,000 from the forged will), means (access to digoxin), and opportunity (alone with the victim during the critical window). Address the defence's timeline argument - the security log doesn't exonerate him, it places him at the scene. The absence of fingerprints suggests premeditation, not innocence. Remind the jury that when you have motive, means, opportunity, and presence at the scene, that's not coincidence - that's guilt beyond reasonable doubt.",
-            
+                "Deliver your closing speech. Summarize the evidence that points to guilt — motive, means, and opportunity. Address the defence's key arguments and explain why they don't create reasonable doubt. Remind the jury that when all the evidence points in one direction, that is proof beyond reasonable doubt. Reference specific evidence from this case.",
+
             ("defence", ExperienceState.DEFENCE_CLOSING):
-                "Deliver your closing speech. This is your final opportunity to save your client. Remind the jury of the reasonable doubt standard - if they're not sure, they must acquit. Systematically dismantle the prosecution's case: the timeline is impossibly tight, the missing physical evidence is damning to their theory, the motive is speculative (discovering a forgery doesn't prove murder), and alternative explanations exist. Emphasize what the prosecution hasn't proven: no direct evidence, no witnesses, no physical connection to the crime. Ask the jury: 'Are you sure? Are you certain beyond reasonable doubt?' If there's any doubt - and there should be - they must find your client not guilty. The prosecution has failed to meet their burden.",
+                "Deliver your closing speech. Remind the jury of the reasonable doubt standard — if they are not sure, they must acquit. Systematically identify the gaps in the prosecution's case. Emphasize what has NOT been proven. Ask the jury: 'Are you sure? Are you certain beyond reasonable doubt?' Reference specific weaknesses in this case's evidence.",
             
             ("judge", ExperienceState.JUDGE_SUMMING_UP):
-                "Sum up the case for the jury. Summarize evidence from both sides fairly and provide legal instructions on burden of proof and reasonable doubt. Do not express an opinion on the verdict."
+                "Sum up the case for the jury. Summarize evidence from both sides fairly and provide legal instructions on burden of proof and reasonable doubt. Do not express an opinion on the verdict.",
+
+            ("witness_1", ExperienceState.EVIDENCE_PRESENTATION):
+                "You have been called to the witness box. Begin your testimony by taking the oath: 'I swear by Almighty God that the evidence I shall give shall be the truth, the whole truth, and nothing but the truth.' Then present your testimony — describe what you observed, what you found, and your professional conclusions. Be clear, specific, and factual.",
+
+            ("witness_1", ExperienceState.CROSS_EXAMINATION):
+                "The defence barrister is now cross-examining you. They will challenge your testimony and try to create doubt. Answer their questions directly and honestly. Defend your findings where they are sound, but acknowledge genuine uncertainty. Do not speculate beyond your expertise.",
+
+            ("witness_2", ExperienceState.EVIDENCE_PRESENTATION):
+                "You have been called to the witness box. Begin by taking the oath: 'I swear by Almighty God that the evidence I shall give shall be the truth, the whole truth, and nothing but the truth.' Then present your testimony — what you observed, what you know, and what happened from your perspective. Be specific about times, places, and details.",
+
+            ("witness_2", ExperienceState.CROSS_EXAMINATION):
+                "The defence barrister is cross-examining you. They may question your reliability, your memory, or your bias. Answer honestly and stand by what you observed, but acknowledge if you are uncertain about specific details.",
+
+            ("defendant", ExperienceState.EVIDENCE_PRESENTATION):
+                "You have been called to the witness box by your defence barrister. Begin by taking the oath: 'I swear by Almighty God that the evidence I shall give shall be the truth, the whole truth, and nothing but the truth.' Then tell the court your side — your actions on the day in question, your relationship with the victim, and your response to the evidence against you. Maintain your innocence.",
+
+            ("defendant", ExperienceState.CROSS_EXAMINATION):
+                "The prosecution barrister is now cross-examining you. They will be aggressive and try to catch you in contradictions. Stay composed. Answer directly — do not dodge questions. If they present evidence against you, provide your explanation. If you don't know something, say 'I don't recall' rather than guessing. Address the barrister respectfully.",
         }
         
         return prompts.get((agent_role, stage), f"Provide your statement for {stage.value}.")
+
+    async def _maybe_judge_intervention(self, responses: list[AgentResponse], stage: ExperienceState) -> Optional[AgentResponse]:
+        """Occasionally have the judge make a brief procedural comment (20% chance).
+
+        In real Crown Court, the judge may redirect counsel, clarify for the jury,
+        or maintain order. This adds realism without slowing the trial significantly.
+        """
+        if random.random() > 0.2:  # 80% of the time, no intervention
+            return None
+
+        if not self.llm_service or "judge" not in self.agents:
+            return None
+
+        # Summarize last 2 responses as context
+        recent = "\n".join([f"{r.agent_role}: {r.content[:200]}" for r in responses[-2:]])
+
+        try:
+            content, _ = await self.llm_service.generate_with_fallback(
+                system_prompt=self.agents["judge"].system_prompt,
+                user_prompt=f"The following exchange just occurred:\n{recent}\n\nAs the presiding judge, make a BRIEF procedural comment (1-2 sentences). You might: clarify a point for the jury, redirect counsel to stay on topic, or note something for the record. Keep it under 50 words.",
+                fallback_text="Members of the jury, please note that point.",
+                max_tokens=80,
+                temperature=0.7,
+                timeout=8
+            )
+            return AgentResponse(
+                agent_role="judge",
+                content=content,
+                timestamp=datetime.now(),
+                metadata={"stage": stage.value, "intervention": True}
+            )
+        except Exception as e:
+            logger.debug(f"Judge intervention skipped: {e}")
+            return None
 
     async def _generate_judge_summary(self) -> AgentResponse:
         """Generate judge's summing up."""
@@ -823,4 +1046,20 @@ Consider all the evidence carefully. You may now retire to deliberate."""
                     "Members of the jury, the evidence is overwhelming. Marcus Ashford had a powerful motive - £500,000 and exposure of his fraud. He had the means - access to digoxin in the estate medical cabinet. He had opportunity - alone with Lord Blackthorn during the critical time window. When motive, means, and opportunity align with presence at the scene, that is not reasonable doubt - that is proof beyond reasonable doubt. The Crown asks you to return a verdict of guilty.",
             })
         
+        # Add witness/defendant fallbacks
+        fallbacks.update({
+            ("witness_1", ExperienceState.EVIDENCE_PRESENTATION):
+                "I can confirm the facts as I observed them in my professional capacity.",
+            ("witness_1", ExperienceState.CROSS_EXAMINATION):
+                "I stand by my testimony. I reported what I observed accurately.",
+            ("witness_2", ExperienceState.EVIDENCE_PRESENTATION):
+                "Based on what I witnessed, I can provide the following account.",
+            ("witness_2", ExperienceState.CROSS_EXAMINATION):
+                "I am confident in my observations and have reported them truthfully.",
+            ("defendant", ExperienceState.EVIDENCE_PRESENTATION):
+                f"I am innocent. I had nothing to do with this crime. I can explain my actions that day.",
+            ("defendant", ExperienceState.CROSS_EXAMINATION):
+                f"I maintain my innocence. I have answered your questions truthfully.",
+        })
+
         return fallbacks.get((agent_role, stage), f"[{agent_role} statement for {stage.value}]")
