@@ -359,35 +359,38 @@ class ExperienceOrchestrator:
             # Update activity timestamp for session timeout tracking
             self.user_session.update_activity()
 
+            # Transition to vote stage (skip if max duration exceeded — verdict still works)
+            if not self.state_machine.is_max_duration_exceeded():
+                await self.state_machine.transition_to(ExperienceState.ANONYMOUS_VOTE)
+
             # Collect votes from all jurors
             vote_result = await self.jury_orchestrator.collect_votes(vote)
-            
+
             # Store in session
             self.user_session.progress.vote = vote
-            
+
             # Evaluate reasoning
             reasoning_assessment = await self.reasoning_evaluator.analyze_statements(
                 self.user_session.progress.deliberation_statements,
                 vote
             )
-            
+
             # Store reasoning assessment
             self.user_session.progress.reasoning_assessment = reasoning_assessment
-            
+
             # Reveal jurors
             juror_reveals = self.jury_orchestrator.reveal_jurors(vote_result)
-            
+
             # Assemble dual reveal
             dual_reveal = self.dual_reveal_assembler.assemble_dual_reveal(
                 vote_result,
                 reasoning_assessment,
                 juror_reveals
             )
-            
-            # Transition through ANONYMOUS_VOTE to DUAL_REVEAL
-            # State machine requires sequential transitions: DELIBERATION → VOTE → REVEAL
-            await self.state_machine.transition_to(ExperienceState.ANONYMOUS_VOTE)
-            await self.state_machine.transition_to(ExperienceState.DUAL_REVEAL)
+
+            # Transition to reveal (skip if timed out — dual reveal data is ready regardless)
+            if not self.state_machine.is_max_duration_exceeded():
+                await self.state_machine.transition_to(ExperienceState.DUAL_REVEAL)
             self.user_session.current_state = ExperienceState.DUAL_REVEAL
             
             # Save progress

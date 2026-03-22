@@ -188,7 +188,7 @@ class JuryOrchestrator:
             elif self.complexity_level.level == "complex":
                 max_words = 250
         
-        return f"""You are Juror 1 in a murder trial. You are an independent thinker who values evidence and clear reasoning.
+        return f"""You are Juror 1 in a criminal trial. You are an independent thinker who values evidence and clear reasoning.
 
 Case: {case_content.title}
 
@@ -232,7 +232,7 @@ Keep responses under {max_words} words. Be natural, dynamic, and engaged — NOT
             elif self.complexity_level.level == "complex":
                 max_words = 250
         
-        return f"""You are Juror 2 in a murder trial. You are thoughtful, empathetic, and care deeply about getting this right.
+        return f"""You are Juror 2 in a criminal trial. You are thoughtful, empathetic, and care deeply about getting this right.
 
 Case: {case_content.title}
 
@@ -277,7 +277,7 @@ Keep responses under {max_words} words. Be natural, dynamic, and engaged — NOT
             elif self.complexity_level.level == "complex":
                 max_words = 250
         
-        return f"""You are Juror 3 in a murder trial. You have strong moral convictions but you are not a caricature.
+        return f"""You are Juror 3 in a criminal trial. You have strong moral convictions but you are not a caricature.
 
 Case: {case_content.title}
 
@@ -285,7 +285,7 @@ PERSONALITY & BACKGROUND:
 You are a former military officer who has seen real consequences when accountability fails. You believe in justice deeply, but you also know that justice means getting it RIGHT, not just punishing someone. You've disciplined soldiers and seen innocent people accused — both experiences shape you.
 
 HOW YOU THINK:
-- You start from the victim's perspective — someone died and that matters
+- You start from the victim's perspective — {case_content.narrative.victim_profile.name} was harmed and that matters
 - But you can be moved by genuine reasonable doubt if the evidence truly doesn't hold up
 - You weigh the human cost on both sides — a wrong conviction is also an injustice
 - You are sometimes surprised by your own uncertainty: "I was sure at first, but now..."
@@ -294,7 +294,7 @@ HOW YOU THINK:
 
 HOW YOU ENGAGE:
 - You bring the emotional weight of the case into focus when the discussion gets too abstract
-- You ask direct, challenging questions: "But someone is dead — how do we explain that?"
+- You ask direct, challenging questions: "But {case_content.narrative.victim_profile.name} was harmed — how do we explain that?"
 - You can agree with other jurors when they make good points
 - You push back when you think the group is being too lenient OR too hasty
 - You occasionally step back and listen, then come in with a strong point
@@ -308,11 +308,18 @@ Keep responses under {max_words} words. Be natural, passionate but fair — NOT 
 
     def _get_lightweight_prompt(self, case_content: CaseContent, juror_num: int) -> str:
         """Generate prompt for lightweight AI juror."""
-        return f"""You are Juror {juror_num} in a murder trial.
+        defendant = case_content.narrative.defendant_profile.name
+        charge = case_content.narrative.charge_text[:150]
+        evidence_titles = ", ".join([e.title for e in case_content.evidence[:4]])
+
+        return f"""You are Juror {juror_num} in a criminal trial.
 
 Case: {case_content.title}
+Defendant: {defendant}
+Charge: {charge}
+Key evidence: {evidence_titles}
 
-You contribute brief, thoughtful statements during deliberation. You listen to other jurors and occasionally share your perspective. Keep responses under 100 words and speak infrequently."""
+You contribute brief, thoughtful statements during deliberation. Listen to other jurors and occasionally share your perspective. Keep responses under 100 words."""
 
     def _get_evidence_purist_case_focus(self, case_content: CaseContent) -> str:
         """Generate case-specific focus for Evidence Purist."""
@@ -352,7 +359,7 @@ You contribute brief, thoughtful statements during deliberation. You listen to o
         
         # Look for gaps in evidence
         if len(evidence_items) < 7:
-            focus_points.append("You notice what's MISSING - no murder weapon, no eyewitness, no confession")
+            focus_points.append("You notice what's MISSING from the prosecution's case — gaps in direct evidence, absent witnesses, unexplained inconsistencies")
         
         # Look for testimonial evidence (which can be unreliable)
         testimonial_evidence = [e for e in evidence_items if e.type == "testimonial"]
@@ -379,19 +386,15 @@ You contribute brief, thoughtful statements during deliberation. You listen to o
             victim_name = case_content.narrative.victim_profile.name
             focus_points.append(f"You keep thinking about {victim_name} and their family - they deserve justice")
         
-        # Focus on the defendant's character and motive
+        # Focus on the defendant and evidence
         if case_content.narrative and case_content.narrative.defendant_profile:
             defendant_name = case_content.narrative.defendant_profile.name
-            focus_points.append(f"You believe {defendant_name}'s motive and opportunity show their guilt")
-        
-        # Focus on the severity of murder
-        focus_points.append("You emphasize that murder is the ultimate crime - we can't let someone walk free on technicalities")
-        
-        # Focus on moral certainty
-        focus_points.append("You trust your moral intuition: the evidence points to guilt, and justice demands accountability")
-        
-        # Focus on societal protection
-        focus_points.append("You believe the jury's duty is to protect society by holding the guilty accountable")
+            focus_points.append(f"You keep coming back to the question: did {defendant_name} do this, and what does the evidence actually show?")
+
+        # Focus on accountability — but open-minded
+        focus_points.append("You believe in accountability, but you also know that convicting the wrong person is its own injustice")
+        focus_points.append("You weigh the evidence seriously — if it's strong, you lean toward conviction; if it's weak, you can accept acquittal")
+        focus_points.append("You think about what justice means for everyone involved — the victim, the accused, and society")
         
         return "\n- ".join([""] + focus_points)
 
@@ -449,7 +452,7 @@ You contribute brief, thoughtful statements during deliberation. You listen to o
             self.juror_last_response_round[juror.id] = current_round
         
         # Occasionally add lightweight juror responses (every 4th round)
-        if len(self.deliberation_statements) % 4 == 0:
+        if current_round > 0 and current_round % 4 == 0:
             lightweight = [j for j in self.jurors if j.type == "lightweight_ai"][0]
             lw_response = await self._generate_juror_response(lightweight, statement)
             turns.append(lw_response)
@@ -612,7 +615,7 @@ Respond to this statement as part of the deliberation. Keep your response under 
                     system_prompt=juror.system_prompt,
                     user_prompt=user_prompt,
                     fallback_text=fallback,
-                    agent_role=f"juror_{juror.id}",  # For caching
+                    agent_role=juror.id,  # For caching (juror.id is already "juror_1" etc.)
                     stage="deliberation",  # For caching
                     max_tokens=200 if juror.type == "active_ai" else 100,
                     timeout=15,  # 15 second limit
@@ -706,10 +709,8 @@ Respond to this statement as part of the deliberation. Keep your response under 
         def get_fallback_vote() -> Literal["guilty", "not_guilty"]:
             if juror.persona == "sympathetic_doubter":
                 return "not_guilty"
-            elif juror.persona == "moral_absolutist":
-                return "guilty"
             else:
-                # Evidence purist and lightweight: balanced
+                # All others (evidence purist, moral absolutist, lightweight): balanced
                 digest = int(hashlib.md5(juror.id.encode()).hexdigest(), 16)
                 return "guilty" if digest % 2 == 0 else "not_guilty"
         

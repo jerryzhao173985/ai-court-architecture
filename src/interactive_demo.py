@@ -11,7 +11,7 @@ async def run_interactive_experience():
     print("=" * 70)
     print()
     print("Welcome! You are about to serve as a juror in a British Crown Court")
-    print("murder trial. This experience will take approximately 15 minutes.")
+    print("criminal trial. This experience will take approximately 15 minutes.")
     print()
     
     # Select case

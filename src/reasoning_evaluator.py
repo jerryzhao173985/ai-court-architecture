@@ -33,9 +33,9 @@ class ReasoningEvaluator:
                 r"(?i)(liar|dishonest|untrustworthy)"
             ],
             "appeal_to_emotion": [
-                r"(?i)(think about|imagine|feel)",
-                r"(?i)(tragic|heartbreaking|terrible)",
-                r"(?i)(deserve|victim|suffer)"
+                r"(?i)(feel sorry for|imagine the pain|think about how .* feels)",
+                r"(?i)(heartbreaking|devastating|makes me sick)",
+                r"(?i)(they deserve to suffer|justice for the family)"
             ],
             "false_dichotomy": [
                 r"(?i)(either|only two|must be)",
@@ -166,10 +166,18 @@ class ReasoningEvaluator:
         return list(referenced_ids)
 
     def _extract_key_terms(self, text: str) -> list[str]:
-        """Extract key terms from text (3+ character words)."""
-        words = re.findall(r'\b\w{3,}\b', text)
-        # Filter out common words
-        common = {'the', 'and', 'for', 'with', 'from', 'that', 'this', 'was', 'were'}
+        """Extract key terms from text (5+ character words, filtering common words)."""
+        words = re.findall(r'\b\w{5,}\b', text)
+        # Filter out common words that appear in normal speech
+        common = {
+            'the', 'and', 'for', 'with', 'from', 'that', 'this', 'was', 'were',
+            'about', 'their', 'there', 'would', 'could', 'should', 'which',
+            'where', 'being', 'other', 'after', 'before', 'think', 'these',
+            'those', 'might', 'based', 'under', 'given', 'while', 'since',
+            'account', 'analysis', 'report', 'records', 'evidence', 'shows',
+            'between', 'against', 'during', 'through', 'defendant', 'security',
+            'financial', 'access',
+        }
         return [w for w in words if w.lower() not in common]
 
     def _calculate_evidence_score(self, referenced_ids: list[str]) -> float:

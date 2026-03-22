@@ -154,8 +154,9 @@ async def test_generate_ai_vote_invalid_response(mock_llm_service, sample_case_c
     # Execute
     vote, reasoning = await orchestrator._generate_ai_vote(juror)
     
-    # Verify fallback behavior (moral_absolutist should vote guilty)
-    assert vote == "guilty"
+    # Verify fallback behavior (moral_absolutist now uses balanced MD5 hash like other jurors)
+    # juror_3 MD5 hash is odd → not_guilty
+    assert vote == "not_guilty"
     assert "Fallback vote" in reasoning
 
 

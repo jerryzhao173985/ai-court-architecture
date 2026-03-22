@@ -1,6 +1,7 @@
 """Trial layer agent orchestration for VERITAS courtroom experience."""
 
 import asyncio
+import json
 import random
 from datetime import datetime
 from typing import Optional, Literal
@@ -758,7 +759,7 @@ Keep responses under 400 words."""
                 "Deliver your closing speech. Remind the jury of the reasonable doubt standard — if they are not sure, they must acquit. Systematically identify the gaps in the prosecution's case. Emphasize what has NOT been proven. Ask the jury: 'Are you sure? Are you certain beyond reasonable doubt?' Reference specific weaknesses in this case's evidence.",
             
             ("judge", ExperienceState.JUDGE_SUMMING_UP):
-                "Sum up the case for the jury. Summarize evidence from both sides fairly and provide legal instructions on burden of proof and reasonable doubt. Do not express an opinion on the verdict.",
+                "Sum up the case for the jury. You must cover: (1) the charge and what the prosecution must prove, (2) a fair summary of the key evidence from both prosecution and defence, (3) the legal standard — the burden of proof rests on the prosecution, and you must be satisfied beyond reasonable doubt, (4) remind the jury to consider only the evidence presented in court. Do NOT express any opinion on the verdict. Address them as 'Members of the jury'.",
 
             ("witness_1", ExperienceState.EVIDENCE_PRESENTATION):
                 "You have been called to the witness box. Begin your testimony by taking the oath: 'I swear by Almighty God that the evidence I shall give shall be the truth, the whole truth, and nothing but the truth.' Then present your testimony — describe what you observed, what you found, and your professional conclusions. Be clear, specific, and factual.",
@@ -892,7 +893,6 @@ Only flag clear factual errors, not interpretations or arguments."""
             )
             
             # Parse JSON response
-            import json
             result_data = json.loads(response)
             
             # Apply confidence threshold (0.7 = 70% confidence required)
@@ -936,8 +936,13 @@ Only flag clear factual errors, not interpretations or arguments."""
             Fact checker agent response
         """
         self.fact_check_count += 1
-        
-        content = f"I must intervene. {result.correction} The evidence shows: {result.contradicting_evidence}"
+
+        parts = ["⚠️ I must intervene."]
+        if result.correction:
+            parts.append(result.correction)
+        if result.contradicting_evidence:
+            parts.append(f"The evidence shows: {result.contradicting_evidence}")
+        content = " ".join(parts)
         
         return AgentResponse(
             agent_role="fact_checker",
@@ -1002,10 +1007,10 @@ Consider all the evidence carefully. You may now retire to deliberate."""
         
         fallbacks = {
             ("clerk", ExperienceState.CHARGE_READING): 
-                "The defendant is charged with murder. How do you plead?",
+                self.case_content.narrative.charge_text if self.case_content else "The defendant is charged. How do you plead?",
             
             ("prosecution", ExperienceState.PROSECUTION_OPENING):
-                f"Members of the jury, the Crown will prove beyond reasonable doubt that {defendant_name} committed this crime. The evidence will show motive, means, and opportunity. We ask you to listen carefully to the facts and apply the law.",
+                f"Members of the jury, the Crown will prove beyond reasonable doubt that {defendant_name} committed this crime. We will present evidence that, taken together, leaves no room for doubt. We ask you to listen carefully to the facts and apply the law.",
             
             ("defence", ExperienceState.DEFENCE_OPENING):
                 f"Members of the jury, the prosecution will present a case built on speculation and circumstantial evidence. They will ask you to fill gaps with assumptions. But assumptions are not proof. The burden of proof rests entirely with the prosecution, and they must prove guilt beyond reasonable doubt. As you listen to their case, ask yourself: where is the direct evidence? Where are the witnesses? Where is the proof? The defence will show you that the prosecution's case is built on a foundation of doubt, not certainty.",
@@ -1023,10 +1028,10 @@ Consider all the evidence carefully. You may now retire to deliberate."""
                 "The Crown presents evidence that establishes the defendant's guilt. Each piece of evidence connects to form a clear picture of what happened.",
             
             ("prosecution", ExperienceState.CROSS_EXAMINATION):
-                "The defence would have you focus on minor details, but the fundamental facts remain: the defendant had motive, means, and opportunity. These are not coincidences.",
+                "The defence would have you focus on minor details, but the fundamental facts remain: the evidence connects the defendant to this crime. These are not coincidences.",
             
             ("prosecution", ExperienceState.PROSECUTION_CLOSING):
-                f"Members of the jury, the evidence is clear. {defendant_name} had motive, means, and opportunity. When these elements align with the evidence presented, that is proof beyond reasonable doubt. The Crown asks you to return a verdict of guilty.",
+                f"Members of the jury, the evidence is clear. The Crown has presented a case that, piece by piece, demonstrates the guilt of {defendant_name} beyond reasonable doubt. We ask you to return a verdict of guilty.",
             
             ("judge", ExperienceState.JUDGE_SUMMING_UP):
                 "Members of the jury, you must consider all evidence and apply the law. The burden of proof rests with the prosecution. If you have reasonable doubt, you must acquit."

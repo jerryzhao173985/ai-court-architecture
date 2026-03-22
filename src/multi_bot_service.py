@@ -43,6 +43,7 @@ class MultiBotService:
         
         self.running = False
         self.cleanup_task: Optional[asyncio.Task] = None
+        self._warned_sessions: set = set()  # Prevent warning spam
         
         # Log configured bots
         configured_roles = self.multi_bot.get_configured_roles()
@@ -507,6 +508,15 @@ class MultiBotService:
             )
             return
         
+        # State guard — only allow voting during deliberation or vote stage
+        current = orchestrator.state_machine.current_state
+        if current not in (ExperienceState.JURY_DELIBERATION, ExperienceState.ANONYMOUS_VOTE):
+            await self.multi_bot.send_as_agent(
+                "clerk", group_id,
+                "⚖️ Voting is only available during jury deliberation."
+            )
+            return
+
         if not vote or vote not in ["guilty", "not_guilty"]:
             await self.multi_bot.send_as_agent(
                 "clerk",
@@ -514,7 +524,7 @@ class MultiBotService:
                 "⚠️ Invalid vote. Use: /vote guilty OR /vote not_guilty"
             )
             return
-        
+
         # Submit vote
         await self.multi_bot.send_as_agent("clerk", group_id, "🗳️ Collecting votes from all jurors...")
         
@@ -949,6 +959,7 @@ Each agent is a separate bot for a realistic courtroom experience!"""
                 
                 del self.active_sessions[session_id]
             del self.uid_to_session[uid]
+            self._warned_sessions.discard(session_id)
         
         if group_id in self.group_users:
             self.group_users[group_id].discard(uid)
@@ -1003,19 +1014,20 @@ Each agent is a separate bot for a realistic courtroom experience!"""
                     # Check for 30 min warning
                     elif inactive_duration >= 30:
                         # Check if we've already sent a warning (use metadata to track)
-                        # For simplicity, we'll send warning each time we check (every 5 min)
-                        # In production, you might want to track "warning_sent" flag
-                        logger.info(f"Session {session_id} inactive for {inactive_duration:.1f} min - sending warning")
-                        try:
-                            await self.multi_bot.send_as_agent(
-                                "clerk",
-                                group_id,
-                                f"⚠️ Your trial has been inactive for {int(inactive_duration)} minutes. "
-                                f"The session will timeout after 60 minutes of inactivity.\n\n"
-                                f"Type /continue or /status to keep your session active."
-                            )
-                        except Exception as e:
-                            logger.error(f"Failed to send warning for session {session_id}: {e}")
+                        # Only warn once per session (prevents warning spam every 5 min)
+                        if session_id not in self._warned_sessions:
+                            self._warned_sessions.add(session_id)
+                            logger.info(f"Session {session_id} inactive for {inactive_duration:.1f} min - sending warning")
+                            try:
+                                await self.multi_bot.send_as_agent(
+                                    "clerk",
+                                    group_id,
+                                    f"⚠️ Your trial has been inactive for {int(inactive_duration)} minutes. "
+                                    f"The session will timeout after 60 minutes of inactivity.\n\n"
+                                    f"Type /continue or /status to keep your session active."
+                                )
+                            except Exception as e:
+                                logger.error(f"Failed to send warning for session {session_id}: {e}")
                 
                 # Cleanup timed-out sessions
                 for user_id, group_id, session_id in sessions_to_cleanup:
@@ -1026,6 +1038,7 @@ Each agent is a separate bot for a realistic courtroom experience!"""
                             "⏰ Trial timed out due to inactivity."
                         )
                         await self._cleanup_user_session(user_id, group_id)
+                        self._warned_sessions.discard(session_id)
                         logger.info(f"Cleaned up inactive session {session_id}")
                     except Exception as e:
                         logger.error(f"Failed to cleanup session {session_id}: {e}")
