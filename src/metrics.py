@@ -130,7 +130,7 @@ class MetricsCollector:
             self._agent_metrics.append(metrics)
         
         # Log slow responses
-        if metrics.duration_ms > 5000:  # > 5 seconds
+        if metrics.duration_ms > 10000:  # > 10 seconds (GPT-4o typically 5-9s)
             logger.warning(
                 f"Slow agent response: {metrics.agent_role} at {metrics.stage} "
                 f"took {metrics.duration_ms:.0f}ms"

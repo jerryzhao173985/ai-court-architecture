@@ -184,18 +184,26 @@ class LuffaBotService:
             )
             return
         
-        # Select case: use provided case_id or randomly select
-        if case_id is None:
-            from case_manager import CaseManager
-            import random
+        # Select case: resolve query, or randomly select
+        from case_manager import CaseManager
+        import random
 
-            case_manager = CaseManager()
+        case_manager = CaseManager()
+
+        if case_id is not None:
+            result = case_manager.resolve_case_id(case_id)
+            if result is None:
+                await self.client.send_group_message(
+                    group_id,
+                    f"❌ No case matching \"{case_id}\". Type /cases to see available cases."
+                )
+                return
+            case_id, _ = result
+        else:
             available_cases = case_manager.list_available_cases()
-
             if not available_cases:
                 await self.client.send_group_message(group_id, "❌ No cases available.")
                 return
-
             case_id, _ = random.choice(available_cases)
             logger.info(f"Randomly selected case: {case_id}")
 
@@ -641,7 +649,7 @@ Coherence Score: {assessment['coherenceScore']:.2f}/1.0
                 cases_text += f"{idx}. {title}\n"
                 cases_text += f"   Case ID: {case_id}\n\n"
         
-        cases_text += "Type /start <case-id> to begin a specific case,\nor /start to randomly select one."
+        cases_text += "Type /start <number or name> to begin, or /start for random."
         
         if msg_type == 1:  # Group
             await self.client.send_group_message(uid, cases_text)
@@ -653,7 +661,7 @@ Coherence Score: {assessment['coherenceScore']:.2f}/1.0
         help_text = """🎭 VERITAS COURTROOM EXPERIENCE
 
 Commands:
-/start [case-id] - Begin a new trial (random case if no ID provided)
+/start [1|name] - Begin trial (by number, name, or random)
 /cases - List all available cases
 /continue - Advance to next stage
 /vote guilty - Vote guilty

@@ -193,23 +193,31 @@ class MultiBotService:
             )
             return
         
-        # Select case: use provided case_id or randomly select from available cases
-        if case_id is None:
-            from case_manager import CaseManager
-            import random
-            
-            case_manager = CaseManager()
-            available_cases = case_manager.list_available_cases()
-            
-            if not available_cases:
+        # Select case: resolve query, or randomly select
+        from case_manager import CaseManager
+        import random
+
+        case_manager = CaseManager()
+
+        if case_id is not None:
+            # User provided a query — resolve it (number, partial, or full ID)
+            result = case_manager.resolve_case_id(case_id)
+            if result is None:
                 await self.multi_bot.send_as_agent(
-                    "clerk",
-                    group_id,
-                    "❌ No cases available. Please contact the administrator."
+                    "clerk", group_id,
+                    f"❌ No case matching \"{case_id}\". Type /cases to see available cases."
                 )
                 return
-            
-            # Randomly select a case
+            case_id, _ = result
+        else:
+            # No query — random selection
+            available_cases = case_manager.list_available_cases()
+            if not available_cases:
+                await self.multi_bot.send_as_agent(
+                    "clerk", group_id,
+                    "❌ No cases available."
+                )
+                return
             case_id, _ = random.choice(available_cases)
             logger.info(f"Randomly selected case: {case_id}")
         
@@ -742,7 +750,7 @@ class MultiBotService:
                 cases_text += f"{idx}. {title}\n"
                 cases_text += f"   Case ID: {case_id}\n\n"
         
-        cases_text += "Type /start <case-id> to begin a specific case,\nor /start to randomly select one."
+        cases_text += "Type /start <number or name> to begin, or /start for random."
         
         await self.multi_bot.send_as_agent("clerk", group_id, cases_text)
 
@@ -751,7 +759,7 @@ class MultiBotService:
         help_text = """🎭 VERITAS COURTROOM EXPERIENCE
 
 Commands:
-• /start [case-id] - Begin a new trial (random case if no ID provided)
+• /start [1|name] - Begin trial (by number, name, or random)
 • /cases - List all available cases
 • /stop - Stop current trial
 • /continue - Advance to next stage

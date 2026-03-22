@@ -236,5 +236,45 @@ class CaseManager:
             except Exception as e:
                 logger.warning(f"Skipping invalid case file {case_file}: {e}")
                 continue
-        
-        return available_cases
+
+        return sorted(available_cases)  # Consistent ordering for number-based selection
+
+    def resolve_case_id(self, query: str) -> Optional[tuple[str, str]]:
+        """Resolve a user query to a case_id.
+
+        Supports:
+        - Number: "1", "2" → picks by position in sorted list
+        - Partial match: "blackthorn", "digital" → matches against case_id or title
+        - Full case_id: "blackthorn-hall-001" → exact match
+
+        Args:
+            query: User input (number, partial name, or full case_id)
+
+        Returns:
+            (case_id, title) tuple if found, None if no match
+        """
+        available = self.list_available_cases()
+        if not available:
+            return None
+
+        # Try as number (1-indexed)
+        try:
+            idx = int(query) - 1
+            if 0 <= idx < len(available):
+                return available[idx]
+        except ValueError:
+            pass
+
+        # Try exact match on case_id
+        for case_id, title in available:
+            if case_id == query:
+                return (case_id, title)
+
+        # Try partial match on case_id or title (case-insensitive)
+        query_lower = query.lower()
+        matches = [(cid, t) for cid, t in available
+                   if query_lower in cid.lower() or query_lower in t.lower()]
+        if len(matches) == 1:
+            return matches[0]
+
+        return None
